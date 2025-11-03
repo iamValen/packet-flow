@@ -1,7 +1,7 @@
 import { NetworkInterface } from './NetworkInterface.js';
 
 
-export type NodeType = 'ROUTER' | 'HOST' | 'FIREWALL';
+export type NodeType = "ROUTER" | "HOST" | "FIREWALL" | "SWITCH";
 
 /**
  * Abstract class of a network node
@@ -12,22 +12,22 @@ export abstract class Node {
     abstract readonly type: NodeType;
     position: { x: number; y: number };
 
-    constructor(id: string, name: string, position: {x: number, y: number}){
-        this.id = id;
+    constructor(name: string, position: {x: number, y: number}){
+        this.id = crypto.randomUUID();
         this.name = name;
         this.position = position;
     }
-    
+
     /**
      * Get all interfaces on this node
     */
    abstract getInterfaces(): NetworkInterface[];
-   
+
     /**
     * Each node type implements its own packet forwarding logic
     */
     abstract canForwardPacket(): boolean;
-   
+
     /**
      * Forward a packet through this node (Router, Switch or Firewall)
      */
