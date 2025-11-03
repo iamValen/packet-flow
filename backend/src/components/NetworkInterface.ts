@@ -11,6 +11,12 @@ export class NetworkInterface {
     private _mac: string;
     parentNode?: Node;
 
+    /**
+     * Create a Network Interface
+     * @param ip IPv4 Address, for example: "192.168.1.100"
+     * @param mask IPv4 format Address of the mask, for example: "255.255.255.0", "255.255.0.0"...
+     * @param mac Mac of the Network Interface
+     */
     constructor(ip: string, mask: string, mac?: string) {
         this.id = crypto.randomUUID();
         if (!NetworkInterface.isValidIP(ip)) throw new Error(`Invalid IP: ${ip}`);
@@ -22,6 +28,7 @@ export class NetworkInterface {
         this._mac = mac || NetworkInterface.generateMAC();
     }
 
+    // Getters
     get ip(): string { return this._ip; }
     get mask(): string { return this._mask; }
     get cidr(): number { return this._cidr; }

@@ -3,7 +3,8 @@ import { Node } from "./Node.js"
 export type Protocol = 'ICMP' | 'TCP' | 'UDP';
 
 /**
- * Simulates a network Packet
+ * Represents a Network Packet - the basic data unit traveling between nodes
+ * It carries addressing (IP/MAC), protocol, and optional payload data
  */
 export class Packet {
     readonly id: string;
@@ -16,7 +17,15 @@ export class Packet {
     ttl: number;
     history: Node[] = [];
     readonly timestamp: number;
-
+    
+    /**
+     * Create a Network Packet
+     * @param srcIp Source IP address (IPv4) of the sender
+     * @param dstIp Destination IP address (IPv4)
+     * @param protocol Transport/network protocol: ICMP, TCP, UDP
+     * @param payload Optional packet data (e.g., "ICMP Echo Request")
+     * @param srcMAC Optional source MAC address (for Layer 2 simulation)
+     */
     constructor(srcIp: string, dstIp: string, protocol: Protocol = 'ICMP', payload?: string, srcMAC?: string) {
         this.id = crypto.randomUUID();
         this.srcIp = srcIp;
@@ -28,22 +37,35 @@ export class Packet {
         this.timestamp = Date.now();
     }
 
+    /**
+     * Decrease the packet’s Time To Live by one - called on every hop
+     * If TTL reaches 0, the packet is considered expired and must be dropped
+     */
     decrementTTL(): void {
         this.ttl--;
     }
 
+    /**
+     * Check if the packet’s TTL has reached zero or below
+     * @returns true if the packet should be discarded due to TTL expiration
+     */
     isExpired(): boolean {
         return this.ttl <= 0;
     }
 
     /**
-     * Push node to the history to visualize each hop through each node
+     * Append the node to the history to visualize each hop through each node
      * @param nodeID current node where the packet is
      */
     logHop(node: Node): void {
         this.history.push(node);
     }
-    
+
+    /**
+     * Set or update the destination MAC address for this packet
+     * Useful for switches or ARP-like mechanisms when resolving Layer 2 destinations
+     * @param mac Destination MAC address
+     */
     setDestinationMAC(mac: string): void {
         this.dstMAC = mac;
     }

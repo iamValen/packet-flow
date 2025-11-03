@@ -1,7 +1,15 @@
 import { NetworkInterface } from './NetworkInterface.js';
 
 
-export type NodeType = "ROUTER" | "HOST" | "FIREWALL" | "SWITCH";
+export const NodeType = {
+    ROUTER: "ROUTER",
+    HOST: "HOST",
+    FIREWALL: "FIREWALL",
+    SWITCH: "SWITCH",
+} as const
+
+export type NodeType = (typeof NodeType) [keyof typeof NodeType]   
+
 
 /**
  * Abstract class of a network node
@@ -12,6 +20,11 @@ export abstract class Node {
     abstract readonly type: NodeType;
     position: { x: number; y: number };
 
+    /**
+     * 
+     * @param name 
+     * @param position 
+     */
     constructor(name: string, position: {x: number, y: number}){
         this.id = crypto.randomUUID();
         this.name = name;
