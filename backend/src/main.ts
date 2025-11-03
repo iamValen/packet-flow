@@ -1,4 +1,4 @@
-import { NetworkInterface } from "./NetworkInterface.js";
+import { NetworkInterface } from "./components/NetworkInterface.js";
 
 console.log("--- Manual Tests for IPUtils.isValidIP ---");
 

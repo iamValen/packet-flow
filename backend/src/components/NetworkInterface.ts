@@ -1,6 +1,6 @@
 /**
- * Represents a network interface with IP address and subnet mask.
- * Provides helpers for subnet calculations.
+ * Represents a network interface with IP address and subnet mask
+ * Provides helpers for subnet calculations
 */
 export class NetworkInterface {
     private _ip: string;
