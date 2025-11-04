@@ -1,6 +1,9 @@
-import { NetworkInterface } from './NetworkInterface.js';
+import {NetworkInterface} from "./NetworkInterface.js"
+import { Packet } from "./Packet.js"
 
-
+/**
+ * Enum for the different types of Nodes
+ */
 export const NodeType = {
     ROUTER: "ROUTER",
     HOST: "HOST",
@@ -12,7 +15,7 @@ export type NodeType = (typeof NodeType) [keyof typeof NodeType]
 
 
 /**
- * Abstract class of a network node
+ * Abstract class of a network node that is a device that is in the network
  */
 export abstract class Node {
     readonly id: string;
@@ -32,9 +35,9 @@ export abstract class Node {
     }
 
     /**
-     * Get all interfaces on this node
-    */
-   abstract getInterfaces(): NetworkInterface[];
+     * Returns all the interfaces of a node - used in Topology to remove and get Nodes Interfaces
+     */
+    abstract getInterfaces(): NetworkInterface[];
 
     /**
     * Each node type implements its own packet forwarding logic
@@ -43,8 +46,9 @@ export abstract class Node {
 
     /**
      * Forward a packet through this node (Router, Switch or Firewall)
+     * @param packet - Packet with the {@link Packet} structure
      */
-    abstract forwardPacket?(packet: any): void;
+    abstract forwardPacket?(packet: Packet): void;
 
     /**
      * Serialize to JSON

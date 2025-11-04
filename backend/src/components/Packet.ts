@@ -20,11 +20,11 @@ export class Packet {
     
     /**
      * Create a Network Packet
-     * @param srcIp Source IP address (IPv4) of the sender
-     * @param dstIp Destination IP address (IPv4)
-     * @param protocol Transport/network protocol: ICMP, TCP, UDP
-     * @param payload Optional packet data (e.g., "ICMP Echo Request")
-     * @param srcMAC Optional source MAC address (for Layer 2 simulation)
+     * @param srcIp - Source IP address (IPv4) of the sender
+     * @param dstIp - Destination IP address (IPv4)
+     * @param protocol - Transport/network protocol: ICMP, TCP, UDP
+     * @param payload - Optional packet data (e.g., "ICMP Echo Request")
+     * @param srcMAC - Optional source MAC address (for Layer 2 simulation)
      */
     constructor(srcIp: string, dstIp: string, protocol: Protocol = 'ICMP', payload?: string, srcMAC?: string) {
         this.id = crypto.randomUUID();

@@ -34,31 +34,30 @@ export class NetworkInterface {
     get cidr(): number { return this._cidr; }
     get mac(): string { return this._mac; }
 
-    setParentNode(node: Node): void {
-        this.parentNode = node;
-    }
-
+    
     /**
      * Generates a valid Mac address 
      * It chooses 2 random hexadecimal digits from the "hexDigits" string and repeats it twice
      * @returns Mac address
-     */
+    */
     static generateMAC(): string {
         const hexDigits = '0123456789ABCDEF';
+
         let mac = '';
         for (let i = 0; i < 6; i++) {
-            if (i > 0) mac += ':';
-            mac += hexDigits[Math.floor(Math.random() * 16)];
-            mac += hexDigits[Math.floor(Math.random() * 16)];
+           if (i > 0) mac += ':';
+           mac += hexDigits[Math.floor(Math.random() * 16)];
+           mac += hexDigits[Math.floor(Math.random() * 16)];
         }
+
         return mac;
     }
-
+    
     /**
      * Creates a NetworkInterface object from CIDR notation
-     * @param cidrNotation CIDR notation like: "192.168.1.10/24"
+     * @param cidrNotation - CIDR notation like: "192.168.1.10/24"
      * @returns NetworkInterface created
-     */
+    */
     static fromCIDR(cidrNotation: string, mac?: string): NetworkInterface {
         const [ip, prefix] = cidrNotation.split('/');
         if(ip == undefined || prefix == undefined) 
@@ -70,8 +69,16 @@ export class NetworkInterface {
     }
 
     /**
+     * Set a node as the parent of this Network Interface
+     * @param node - Node that will be set as parent
+     */
+    setParentNode(node: Node): void {
+        this.parentNode = node;
+    }
+ 
+    /**
      * Check if certain string input is a valid IPv4 adrress, needs to be 4 octets of 3 numbers from 0 to 255
-     * @param ip e.g. "192.168.1.1", "255.255.255.255", "0.0.0.0"
+     * @param ip - e.g. "192.168.1.1", "255.255.255.255", "0.0.0.0"
      * @returns true if valid, false if not
      */
     static isValidIP(ip: string): boolean {
@@ -88,7 +95,7 @@ export class NetworkInterface {
 
     /**
      * Validate subnet mask: must be valid IPv4 address and contiguous 1s followed by 0s
-     * @param mask e.g. "255.255.255.0"
+     * @param mask - e.g. "255.255.255.0"
      * @returns true if valid, false if not
      */
     static isValidSubnetMask(mask: string): boolean {
@@ -121,7 +128,7 @@ export class NetworkInterface {
     getNetworkAddress(): string {
         const ipParts: number[] = this._ip.split('.').map((n: string): number => parseInt(n, 10));
         const maskParts: number[] = this._mask.split('.').map((n: string): number => parseInt(n, 10));
-        const network: number[] = ipParts.map((part: number, i: number) => part & maskParts[i]!); // bitwise AND
+        const network: number[] = ipParts.map((part: number, i: number) => part & (maskParts[i] ?? 0)); // bitwise AND
         return network.join('.');
     }
 
@@ -133,8 +140,9 @@ export class NetworkInterface {
     getBroadcastAddress(): string {
         const ipParts: number[] = this._ip.split('.').map((n: string): number => parseInt(n, 10));
         const maskParts: number[] = this._mask.split('.').map((n: string): number => parseInt(n, 10));
-        const broadcastParts: number[] = ipParts.map(
-            (ip: number, i: number): number => ip | (~maskParts[i]! & 255)
+        
+        const broadcastParts: number[] = ipParts.map((ip: number, i: number): number => 
+            ip | (~(maskParts[i] ?? 0) & 255)
         ); // flip bits, limit to 8 
         const broadcast: string = broadcastParts.join(".");
         return broadcast;
@@ -154,7 +162,7 @@ export class NetworkInterface {
         const maskParts: number[] = this._mask.split('.').map((n: string): number => parseInt(n, 10));
         
         for (let i = 0; i < 4; i++) {
-            if ((ipParts[i]! & maskParts[i]!) !== networkParts[i])
+            if (((ipParts[i] ?? 0) & (maskParts[i] ?? 0)) !== networkParts[i])
                 return false;
         }
         return true;
@@ -163,7 +171,7 @@ export class NetworkInterface {
     /**
      * Convert mask IP notation to CIDR
      * Take something for example "255.255.255.0" to "24"
-     * @param mask ipv4 notation of mask
+     * @param mask - ipv4 notation of mask
      * @returns Convert subnet mask to CIDR prefix length
      */
     static maskToCidr(mask: string): number {
@@ -180,7 +188,7 @@ export class NetworkInterface {
     /**
      * Convert CIDR to mask IP notation
      * Take something for example "24" and convert to "255.255.255.0"
-     * @param cidr integer (0–32)
+     * @param cidr - integer (0–32)
      * @returns subnet mask in dotted decimal notation
      */
     static cidrToMask(cidr: number): string {
