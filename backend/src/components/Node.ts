@@ -48,7 +48,7 @@ export abstract class Node {
      * Forward a packet through this node (Router, Switch or Firewall)
      * @param packet - Packet with the {@link Packet} structure
      */
-    abstract forwardPacket?(packet: Packet): void;
+    abstract forwardPacket?(packet: Packet, incomingInterface?: NetworkInterface): NetworkInterface[];
 
     /**
      * Serialize to JSON
