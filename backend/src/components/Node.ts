@@ -21,17 +21,23 @@ export abstract class Node {
     readonly id: string;
     name: string;
     abstract readonly type: NodeType;
+    interfaces: NetworkInterface[];
     position: { x: number; y: number };
 
     /**
-     * 
+     * Super constructor for all nodes specializations
      * @param name 
      * @param position 
      */
-    constructor(name: string, position: {x: number, y: number}){
+    constructor(name: string, position: {x: number, y: number}, interfaces: NetworkInterface[] = []){
         this.id = crypto.randomUUID();
         this.name = name;
+        this.interfaces = interfaces;
         this.position = position;
+        
+        // Set the parent node reference for each interface
+        for (const iface of this.interfaces)
+            iface.setParentNode(this);
     }
 
     /**

@@ -1,6 +1,12 @@
 import { Node } from "./Node.js"
 
-export type Protocol = 'ICMP' | 'TCP' | 'UDP';
+export const Protocol = {
+    ICMP: "ICMP",
+    UDP: "UDP",
+    TCP: "TCP",
+} as const
+// use that enum as a type
+export type Protocol = (typeof Protocol) [keyof typeof Protocol] 
 
 /**
  * Represents a Network Packet - the basic data unit traveling between nodes
@@ -26,7 +32,7 @@ export class Packet {
      * @param payload - Optional packet data (e.g., "ICMP Echo Request")
      * @param srcMAC - Optional source MAC address (for Layer 2 simulation)
      */
-    constructor(srcIp: string, dstIp: string, protocol: Protocol = 'ICMP', payload?: string, srcMAC?: string) {
+    constructor(srcIp: string, dstIp: string, protocol: Protocol = Protocol.ICMP, payload?: string, srcMAC?: string) {
         this.id = crypto.randomUUID();
         this.srcIp = srcIp;
         this.dstIp = dstIp;
@@ -35,6 +41,29 @@ export class Packet {
         if(payload != undefined) this.payload = payload;
         this.ttl = 64;
         this.timestamp = Date.now();
+    }
+
+    /**
+     * Create a deep clone of this packet for broadcast/multicast scenarios
+     * Each clone gets a new ID but maintains the same payload and addressing
+     * @returns A new Packet instance with copied properties
+     */
+    clone(): Packet {
+        const clonedPacket = new Packet(
+            this.srcIp,
+            this.dstIp,
+            this.protocol,
+            this.payload,
+            this.srcMAC
+        );
+        
+        if (this.dstMAC) clonedPacket.dstMAC = this.dstMAC;
+        clonedPacket.ttl = this.ttl;
+        
+        // copy history (clone array to avoid shared reference)
+        clonedPacket.history = [...this.history];
+        
+        return clonedPacket;
     }
 
     /**

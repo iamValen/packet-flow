@@ -20,7 +20,6 @@ export type RouteEntry = {
  */
 export class Router extends Node {
     readonly type: NodeType = NodeType.ROUTER;
-    interfaces: NetworkInterface[];
     routingTable: RouteEntry[];
 
     /**
@@ -30,13 +29,8 @@ export class Router extends Node {
      * @param interfaces - Optional list of pre-attached network interfaces
      */
     constructor(name: string, position: { x: number; y: number }, interfaces: NetworkInterface[] = []) {
-        super(name, position);
-        this.interfaces = interfaces;
+        super(name, position, interfaces);
         this.routingTable = [];
-        
-        for (const iface of this.interfaces)
-            iface.setParentNode(this);
-
     }
     
     override canForwardPacket(): boolean { return true; }

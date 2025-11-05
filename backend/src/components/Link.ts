@@ -16,7 +16,7 @@ export class Link {
 
     /**
      * Check if a given Interface makes part of the connection
-     * @param intf 
+     * @param intf - Interface to check
      * @returns true if intf makes part of the connection, flase if not
      */
     involvesInterface(intf: NetworkInterface): boolean {

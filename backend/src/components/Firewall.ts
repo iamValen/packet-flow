@@ -32,7 +32,6 @@ type FirewallRule = {
  */
 export class Firewall extends Node {
     readonly type: NodeType = NodeType.FIREWALL;
-    interfaces: NetworkInterface[];
     private _rules: FirewallRule[];
     private _defaultPolicy: Action;
 
@@ -43,14 +42,9 @@ export class Firewall extends Node {
      * @param interfaces - Network Interfaces that belong to this firewall 
      */
     constructor(name: string, position: { x: number; y: number }, interfaces: NetworkInterface[] = []) {
-        super(name, position);
-        this.interfaces = interfaces;
+        super(name, position, interfaces);
         this._rules = [];
         this._defaultPolicy = Action.ALLOW;
-        
-        for (const iface of this.interfaces) {
-            iface.setParentNode(this);
-        }
     }
 
     override canForwardPacket(): boolean { return true; }
