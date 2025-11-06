@@ -53,6 +53,8 @@ export abstract class Node {
     /**
      * Forward a packet through this node (Router, Switch or Firewall)
      * @param packet - Packet with the {@link Packet} structure
+     * @param incomingInterface - is used to know where the packet came from 
+     * so it can make intelligent forwarding decisions and avoid sending the packet right back out the same link
      */
     abstract forwardPacket?(packet: Packet, incomingInterface?: NetworkInterface): NetworkInterface[];
 

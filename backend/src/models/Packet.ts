@@ -1,3 +1,4 @@
+import { NetworkInterface } from "./NetworkInterface.js";
 import { Node } from "./Node.js"
 
 export const Protocol = {
@@ -30,13 +31,20 @@ export class Packet {
      * @param dstIp - Destination IP address (IPv4)
      * @param protocol - Transport/network protocol: ICMP, TCP, UDP
      * @param payload - Optional packet data (e.g., "ICMP Echo Request")
-     * @param srcMAC - Optional source MAC address (for Layer 2 simulation)
+     * @param srcMAC - Optional source MAC address (for Layer 2)
+     * @param dstMAC - OPtional destination Mac address (L2)
      */
-    constructor(srcIp: string, dstIp: string, protocol: Protocol = Protocol.ICMP, payload?: string, srcMAC?: string) {
+    constructor(srcIp: string, dstIp: string, protocol: Protocol = Protocol.ICMP, payload?: string, srcMAC?: string, dstMAC?: string) {
+        if (!NetworkInterface.isValidIP(srcIp))
+            throw new Error(`Invalid source IP address: ${srcIp}`);
+        if (!NetworkInterface.isValidIP(dstIp))
+            throw new Error(`Invalid destination IP address: ${dstIp}`);
+        
         this.id = crypto.randomUUID();
         this.srcIp = srcIp;
         this.dstIp = dstIp;
         this.srcMAC = srcMAC || 'FF:FF:FF:FF:FF:FF';
+        if(dstMAC != undefined) this.dstMAC = dstMAC;
         this.protocol = protocol;
         if(payload != undefined) this.payload = payload;
         this.ttl = 64;
@@ -54,12 +62,10 @@ export class Packet {
             this.dstIp,
             this.protocol,
             this.payload,
-            this.srcMAC
+            this.srcMAC,
+            this.dstMAC
         );
-        
-        if (this.dstMAC) clonedPacket.dstMAC = this.dstMAC;
         clonedPacket.ttl = this.ttl;
-        
         // copy history (clone array to avoid shared reference)
         clonedPacket.history = [...this.history];
         
