@@ -1,7 +1,7 @@
 import { Node, NodeType } from './Node.js';
 import { NetworkInterface } from './NetworkInterface.js';
 import { Packet } from './Packet.js';
-import { Protocol } from "./Packet.js";
+import { Protocol } from './Packet.js';
 
 /**
  * Represents a host node in the network

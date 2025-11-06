@@ -157,6 +157,8 @@ export class NetworkInterface {
     }
 
     isInSubnet(ip: string): boolean {
+        if(!NetworkInterface.isValidIP(ip))
+            throw new Error(`Invalid IP: ${ip}`);
         const ipParts: number[] = ip.split('.').map((n: string): number => parseInt(n, 10));
         const networkParts: number[] = this.getNetworkAddress().split('.').map((n: string): number => parseInt(n, 10));
         const maskParts: number[] = this._mask.split('.').map((n: string): number => parseInt(n, 10));
@@ -175,6 +177,8 @@ export class NetworkInterface {
      * @returns Convert subnet mask to CIDR prefix length
      */
     static maskToCidr(mask: string): number {
+        if(!NetworkInterface.isValidSubnetMask(mask))
+            throw new Error(`Invalid mask: ${mask}`);
         const maskParts = mask.split('.').map(Number);
         const binaryMask: string = maskParts.map(part => part.toString(2).padStart(8, '0')).join('');
 

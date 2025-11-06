@@ -1,4 +1,4 @@
-import { NetworkInterface } from './NetworkInterface.js';
+import { NetworkInterface } from "./NetworkInterface.js";
 
 /**
  * Represents a connection between two network interfaces
