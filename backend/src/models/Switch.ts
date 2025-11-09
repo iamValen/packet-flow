@@ -5,10 +5,10 @@ import { Packet } from './Packet.js';
 /**
  * Internal structure that represents an entry in the MAC address table
  */
-interface MACTableEntry {
-    mac: string;              // The MAC address learned
-    interfaceId: string;      // The interface ID where the MAC was learned
-    timestamp: number;        // Timestamp of when it was learned (for aging)
+type MACTableEntry = {
+    mac: string; // the MAC address learned
+    interfaceId: string; // the interface ID where the MAC was learned
+    timestamp: number; // Timestamp of when it was learned
 }
 
 /**
@@ -22,7 +22,7 @@ interface MACTableEntry {
 export class Switch extends Node {
     readonly type: NodeType = NodeType.SWITCH;
 
-    private macTable: Map<string, MACTableEntry>;
+    private _macTable: Map<string, MACTableEntry>;
     private readonly MAC_TABLE_TIMEOUT = 300000; // 5 minutes timeout
 
     /**
@@ -33,7 +33,7 @@ export class Switch extends Node {
      */
     constructor(name: string, position: { x: number; y: number }, interfaces: NetworkInterface[] = []) {
         super(name, position, interfaces);
-        this.macTable = new Map();
+        this._macTable = new Map();
     }
 
     override canForwardPacket(): boolean { return true; }
@@ -85,11 +85,22 @@ export class Switch extends Node {
      * @param incomingInterface - The interface where the packet was received
      */
     private learnMAC(srcMAC: string, incomingInterface: NetworkInterface): void {
-        this.macTable.set(srcMAC, {
+        if (srcMAC === "FF:FF:FF:FF:FF:FF") return;
+        
+        this._macTable.set(srcMAC, {
             mac: srcMAC,
             interfaceId: incomingInterface.id,
             timestamp: Date.now()
         });
+    }
+
+    /**
+     * Manually add a MAC table entry (for initialization/testing)
+     * @param mac - MAC address to learn
+     * @param iface - Interface where this MAC was learned
+     */
+    public addMACEntry(mac: string, iface: NetworkInterface): void {
+        this.learnMAC(mac, iface);
     }
 
     /**
@@ -98,12 +109,12 @@ export class Switch extends Node {
      * @returns The interface if found and valid, otherwise null
      */
     private lookupMAC(dstMAC: string): NetworkInterface | null {
-        const entry = this.macTable.get(dstMAC);
+        const entry = this._macTable.get(dstMAC);
         if (!entry) return null;
 
         // check expiration
         if (Date.now() - entry.timestamp > this.MAC_TABLE_TIMEOUT) {
-            this.macTable.delete(dstMAC);
+            this._macTable.delete(dstMAC);
             return null;
         }
 

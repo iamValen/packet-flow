@@ -5,9 +5,26 @@ export const Protocol = {
     ICMP: "ICMP",
     UDP: "UDP",
     TCP: "TCP",
+    ARP: "ARP"
 } as const
 // use that enum as a type
 export type Protocol = (typeof Protocol) [keyof typeof Protocol] 
+
+
+// ARP protocol specific Type and Payload
+export const ARPpayloadType = {
+    REQUEST: "REQUEST",
+    REPLY: "REPLY"
+} as const
+export type ARPpayloadType = (typeof ARPpayloadType) [keyof typeof ARPpayloadType]
+
+export type ARPpayload = {
+    action: ARPpayloadType,
+    senderIP: string,
+    senderMAC: string,
+    targetIP: string,
+    targetMAC?: string,
+}
 
 /**
  * Represents a Network Packet - the basic data unit traveling between nodes
@@ -17,7 +34,7 @@ export class Packet {
     readonly id: string;
     readonly srcIp: string;
     readonly dstIp: string;
-    readonly srcMAC: string;
+    srcMAC: string;
     dstMAC?: string;
     protocol: Protocol;
     payload?: string;

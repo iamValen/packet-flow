@@ -8,7 +8,7 @@ export class NetworkInterface {
     private _ip: string;
     private _mask: string;
     private _cidr: number;
-    private _mac: string;
+    private readonly _mac: string;
     parentNode?: Node;
 
     /**
@@ -25,6 +25,10 @@ export class NetworkInterface {
         this._ip = ip;
         this._mask = mask;
         this._cidr = NetworkInterface.maskToCidr(mask);
+
+        if (mac && !NetworkInterface.isValidMAC(mac))
+            throw new Error(`Invalid MAC address ${mac}`);
+
         this._mac = mac || NetworkInterface.generateMAC();
     }
 
@@ -118,6 +122,15 @@ export class NetworkInterface {
         }
 
         return true;
+    }
+
+    /**
+     * Validate MAC Address
+     * @param mac 
+     * @returns 
+     */
+    static isValidMAC(mac: string): boolean {
+        return /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test(mac);
     }
 
     /**
