@@ -5,7 +5,6 @@ import { Packet, Protocol } from './Packet.js';
 import { Host } from './Host.js';
 import { Router } from './Router.js';
 import { Switch } from './Switch.js';
-import { Firewall } from './Firewall.js';
 import type { ARPEntry } from './Host.js';
 
 /**
@@ -185,6 +184,145 @@ export class Topology {
         return interfaces.some(iface => iface.ip === packet.dstIp);
     }
 
+
+
+    /**
+     * Retrieve a delivered packet to a specific node
+     * @param destinationNode - Node to check
+     * @returns Delivered Packet or undefined
+     */
+    getDeliveredPacket(destinationNode: Node): Packet | undefined {
+        for (const [key, packet] of this.deliveredPackets) {
+            if (key.endsWith(destinationNode.name)) {
+                return packet;
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * Determine all next hop interfaces for a packet
+     * @param packetInFlight - Packet in flight info
+     * @returns Array of NextHopInfo
+     */
+    private findAllNextHops(packetInFlight: PacketInFlight): NextHopInfo[] {
+        const { packet, currentNode, currentInterface } = packetInFlight;
+        let outgoingInterfaces: NetworkInterface[] = [];
+
+        if (currentNode instanceof Host) {
+            if (currentInterface) return [];
+            const sendInterface = currentNode.getInterfaces().find(iface => 
+                iface.isInSubnet(packet.dstIp) || 
+                (currentNode.defaultGateway && iface.isInSubnet(currentNode.defaultGateway))
+            );
+            if (sendInterface) outgoingInterfaces = [sendInterface];
+        } else if (currentNode instanceof Router || currentNode instanceof Switch) {
+            outgoingInterfaces = currentNode.forwardPacket(packet, currentInterface);
+        }
+
+        const nextHops: NextHopInfo[] = [];
+
+        for (const outInterface of outgoingInterfaces) {
+            const link = this.links.find(l => l.involvesInterface(outInterface));
+            if (!link) continue;
+            
+            const nextInterface = link.getOtherEnd(outInterface);
+            if (!nextInterface || !nextInterface.parentNode) continue;
+
+            nextHops.push({
+                nextNode: nextInterface.parentNode,
+                nextInterface,
+                viaLink: link
+            });
+        }
+
+        return nextHops;
+    }
+
+
+    // ARP / MAC utils
+
+    /**
+     * Populate ARP tables for all hosts and routers in the topology
+     * it's used to simplify packet analysis and remove ARP packet from the equasion
+     */
+    populateARPCaches(): void {
+        const hosts = this.nodes.filter(node => node.type === NodeType.HOST) as Host[];
+        const routers = this.nodes.filter(node => node.type === NodeType.ROUTER) as Router[];
+        const switches = this.nodes.filter(node => node.type === NodeType.SWITCH) as Switch[];
+
+        for (const host of hosts) {
+            for (const hostInterface of host.getInterfaces()) {
+                for (const otherHost of hosts) {
+                    if (otherHost === host) continue;
+                    for (const otherInterface of otherHost.getInterfaces()) {
+                        if (hostInterface.isInSubnet(otherInterface.ip)) {
+                            host.addARPEntry(otherInterface.ip, otherInterface.mac);
+                        }
+                    }
+                }
+                for (const router of routers) {
+                    for (const routerInterface of router.getInterfaces()) {
+                        if (hostInterface.isInSubnet(routerInterface.ip)) {
+                            host.addARPEntry(routerInterface.ip, routerInterface.mac);
+                            router.addARPEntry(hostInterface.ip, hostInterface.mac);
+                        }
+                    }
+                }
+            }
+        }
+
+        for (const sw of switches) {
+            for (const swInterface of sw.getInterfaces()) {
+                const link = this.links.find(l => l.involvesInterface(swInterface));
+                if (!link) continue;
+
+                const otherInterface = link.getOtherEnd(swInterface);
+                if (!otherInterface) continue;
+
+                sw.learnMAC(otherInterface.mac, swInterface);
+            }
+        }
+    }
+
+    /**
+     * Get a host's ARP cache by name
+     * @param hostName - Name of the host
+     * @returns Map of IP => ARPEntry or null if host not found
+     */
+    getHostARPCache(hostName: string): Map<string, ARPEntry> | null {
+        const host = this.nodes.find(node => 
+            node.name === hostName && node.type === NodeType.HOST
+        ) as Host | undefined;
+
+        return host ? host.getARPCache() : null;
+    }
+
+
+    // Simulation Control
+
+    /**
+     * Run the simulation until all packets are delivered or stopped
+     * @param stepDelay - Delay in ms between steps
+     */
+    async run(stepDelay: number = 1000, autoPopulateARP: boolean = false): Promise<void> {
+        this.simulationRunning = true;
+        console.log("=== Simulation Started ===");
+
+        if (autoPopulateARP) {
+            console.warn("Running in Simple Mode - ARP caches pre-populated");
+            this.populateARPCaches();
+        }
+
+        while (this.packetsInFlight.length > 0 && this.simulationRunning) {
+            this.step();
+            await new Promise(resolve => setTimeout(resolve, stepDelay));
+        }
+
+        this.simulationRunning = false;
+        console.log("=== Simulation Completed ===");
+    }
+
     /**
      * Process one simulation step: forwards packets and resolves pending ARP
      */
@@ -205,10 +343,10 @@ export class Topology {
             
             const shouldProcessHere = isAtDestination || 
                 (packet.protocol === Protocol.ARP && 
-                (currentNode instanceof Router || currentNode instanceof Firewall));
+                (currentNode instanceof Router));
 
             if (shouldProcessHere) {
-                if (currentNode instanceof Host || currentNode instanceof Router || currentNode instanceof Firewall) {
+                if (currentNode instanceof Host || currentNode instanceof Router) {
                     const reply = currentNode.receivePacket(packet);
                     
                      if (isAtDestination) {
@@ -245,15 +383,16 @@ export class Topology {
                     currentNode: hop.nextNode,
                     currentInterface: hop.nextInterface
                 });
-                console.log(`Packet ${packet.id.slice(0, 8)}: ${currentNode.name} → ${hop.nextNode.name}`);
+                console.log(`Packet ${packet.id.slice(0, 8)}: ${currentNode.name} => ${hop.nextNode.name}`);
             } else {
                 for (const hop of nextHops) {
+                    const clonedPacket = packet.clone();
                     newPacketsInFlight.push({
-                        packet,
+                        packet: clonedPacket,
                         currentNode: hop.nextNode,
                         currentInterface: hop.nextInterface
                     });
-                    console.log(`Packet ${packet.id.slice(0, 8)}: ${currentNode.name} → ${hop.nextNode.name} (broadcast fan-out)`);
+                    console.log(`Packet ${packet.id.slice(0, 8)}: ${currentNode.name} => ${hop.nextNode.name} (broadcast fan-out)`);
                 }
             }
         }
@@ -271,7 +410,7 @@ export class Topology {
                             packet: pending.originalPacket,
                             currentNode: pending.sourceHost,
                         });
-                        console.log(`→ ARP resolved for ${pending.awaitingIp}, sending queued packet.`);
+                        console.log(`=> ARP resolved for ${pending.awaitingIp}, sending queued packet.`);
                         resolved.push(i);
                     }
                 }
@@ -285,137 +424,6 @@ export class Topology {
 
         this.packetsInFlight = newPacketsInFlight;
     }
-
-    /**
-     * Retrieve a delivered packet to a specific node
-     * @param destinationNode - Node to check
-     * @returns Delivered Packet or undefined
-     */
-    getDeliveredPacket(destinationNode: Node): Packet | undefined {
-        for (const [key, packet] of this.deliveredPackets) {
-            if (key.endsWith(destinationNode.name)) {
-                return packet;
-            }
-        }
-        return undefined;
-    }
-
-    /**
-     * Determine all next hop interfaces for a packet
-     * @param packetInFlight - Packet in flight info
-     * @returns Array of NextHopInfo
-     */
-    private findAllNextHops(packetInFlight: PacketInFlight): NextHopInfo[] {
-        const { packet, currentNode, currentInterface } = packetInFlight;
-        let outgoingInterfaces: NetworkInterface[] = [];
-
-        if (currentNode instanceof Host) {
-            if (currentInterface) return [];
-            const sendInterface = currentNode.getInterfaces().find(iface => 
-                iface.isInSubnet(packet.dstIp) || 
-                (currentNode.defaultGateway && iface.isInSubnet(currentNode.defaultGateway))
-            );
-            if (sendInterface) outgoingInterfaces = [sendInterface];
-        } else if (currentNode instanceof Router || currentNode instanceof Switch || currentNode instanceof Firewall) {
-            outgoingInterfaces = currentNode.forwardPacket(packet, currentInterface);
-        }
-
-        const nextHops: NextHopInfo[] = [];
-
-        for (const outInterface of outgoingInterfaces) {
-            const link = this.links.find(l => l.involvesInterface(outInterface));
-            if (!link) continue;
-            
-            const nextInterface = link.getOtherEnd(outInterface);
-            if (!nextInterface || !nextInterface.parentNode) continue;
-
-            nextHops.push({
-                nextNode: nextInterface.parentNode,
-                nextInterface,
-                viaLink: link
-            });
-        }
-
-        return nextHops;
-    }
-
-    /**
-     * Run the simulation until all packets are delivered or stopped
-     * @param stepDelay - Delay in ms between steps
-     */
-    async run(stepDelay: number = 1000): Promise<void> {
-        this.simulationRunning = true;
-        console.log("=== Simulation Started ===");
-
-        while (this.packetsInFlight.length > 0 && this.simulationRunning) {
-            this.step();
-            await new Promise(resolve => setTimeout(resolve, stepDelay));
-        }
-
-        this.simulationRunning = false;
-        console.log("=== Simulation Completed ===");
-    }
-
-
-    // ARP / MAC utils
-
-    /**
-     * Populate ARP tables for all hosts and routers
-     */
-    populateARPCaches(): void {
-        const hosts = this.nodes.filter(node => node.type === NodeType.HOST) as Host[];
-        const routers = this.nodes.filter(node => node.type === NodeType.ROUTER) as Router[];
-        const switches = this.nodes.filter(node => node.type === NodeType.SWITCH) as Switch[];
-
-        for (const host of hosts) {
-            for (const hostInterface of host.getInterfaces()) {
-                for (const otherHost of hosts) {
-                    if (otherHost === host) continue;
-                    for (const otherInterface of otherHost.getInterfaces()) {
-                        if (hostInterface.isInSubnet(otherInterface.ip)) {
-                            host.addARPEntry(otherInterface.ip, otherInterface.mac);
-                        }
-                    }
-                }
-                for (const router of routers) {
-                    for (const routerInterface of router.getInterfaces()) {
-                        if (hostInterface.isInSubnet(routerInterface.ip)) {
-                            host.addARPEntry(routerInterface.ip, routerInterface.mac);
-                            router.addARPEntry(hostInterface.ip, hostInterface.mac);
-                        }
-                    }
-                }
-            }
-        }
-
-        for (const sw of switches) {
-            for (const swInterface of sw.getInterfaces()) {
-                const link = this.links.find(l => l.involvesInterface(swInterface));
-                if (!link) continue;
-
-                const otherInterface = link.getOtherEnd(swInterface);
-                if (!otherInterface) continue;
-
-                sw.addMACEntry(otherInterface.mac, swInterface);
-            }
-        }
-    }
-
-    /**
-     * Get a host's ARP cache by name
-     * @param hostName - Name of the host
-     * @returns Map of IP → ARPEntry or null if host not found
-     */
-    getHostARPCache(hostName: string): Map<string, ARPEntry> | null {
-        const host = this.nodes.find(node => 
-            node.name === hostName && node.type === NodeType.HOST
-        ) as Host | undefined;
-
-        return host ? host.getARPCache() : null;
-    }
-
-
-    // Simulation Control
 
     /**
      * Stop the simulation
