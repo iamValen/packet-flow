@@ -157,6 +157,20 @@ export class Router extends Node {
         return arpPacket;
     }
 
+    public needsArpResolution(dstIp: string): { needed: boolean; targetIp: string; outInterface: NetworkInterface | null } {
+        const outInterface = this.findOutgoingInterface(dstIp);
+        if (!outInterface) return { needed: false, targetIp: dstIp, outInterface: null };
+        
+        const nextHopIp = dstIp;
+        const nextHopMAC = this.lookupARP(nextHopIp);
+        
+        return {
+            needed: !nextHopMAC,
+            targetIp: nextHopIp,
+            outInterface
+        };
+    }
+
 
     // Receive Packets 
 
@@ -419,26 +433,29 @@ export class Router extends Node {
 
         const outInterface = this.findOutgoingInterface(packet.dstIp);
         if (!outInterface) {
-            if (this._defaultPolicy === FirewallAction.ALLOW) {
-                console.log(`Router ${this.name}: No route, default ALLOW => simulating forward`);
-                return [];
-            }
             console.log(`Router ${this.name}: No route to ${packet.dstIp}, dropping packet ${packet.id}`);
             return [];
         }
 
         packet.srcMAC = outInterface.mac;
+        
+        // Determine next hop IP
+        // If destination is in the same subnet as outInterface, next hop is the destination itself
+        // if not, we'd need to look up next-hop router (but for directly connected networks, it's the destination)
         const nextHopIp = packet.dstIp;
         const nextHopMAC = this.lookupARP(nextHopIp);
 
         if (nextHopMAC) {
             packet.dstMAC = nextHopMAC;
             console.log(`Router ${this.name}: Forwarding to ${packet.dstIp} via ${outInterface.ip} (MAC: ${nextHopMAC.slice(0, 8)}...)`);
+            return [outInterface];
         } else {
-            this.sendARPrequest(nextHopIp, outInterface);
+            // when ARP is needed but cache is pre-populated (test mode), it should still forward the packet
+            console.log(`Router ${this.name}: ARP miss for ${nextHopIp}`);
+            
             packet.dstMAC = "FF:FF:FF:FF:FF:FF";
+            
+            return [outInterface]; // the Topology layer will handle ARP queueing
         }
-
-        return [outInterface];
     }
 }

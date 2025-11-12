@@ -7,7 +7,6 @@ import { Packet } from "./Packet.js"
 export const NodeType = {
     ROUTER: "ROUTER",
     HOST: "HOST",
-    FIREWALL: "FIREWALL",
     SWITCH: "SWITCH",
 } as const
 

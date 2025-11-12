@@ -98,7 +98,8 @@ export class Host extends Node {
      */
     addARPEntry(ip: string, mac: string): void {
         this._arpCache.set(ip, { mac, timestamp: Date.now() });
-    }
+    }   
+
 
     /**
      * Look up a MAC address in the ARP cache for a given IP
@@ -118,7 +119,7 @@ export class Host extends Node {
 
     /**
      * Return a copy of the host's ARP cache
-     * @returns Map of IP → ARPEntry
+     * @returns Map of IP => ARPEntry
      */
     getARPCache(): Map<string, ARPEntry> {
         return new Map(this._arpCache);

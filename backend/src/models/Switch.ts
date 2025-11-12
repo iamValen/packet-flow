@@ -50,6 +50,8 @@ export class Switch extends Node {
      * @returns Array of interfaces the packet should be sent out of
      */
     override forwardPacket(packet: Packet, incomingInterface?: NetworkInterface): NetworkInterface[] {
+        this.cleanMACTable();
+
         packet.decrementTTL();
         if (packet.isExpired()) return [];
 
@@ -59,7 +61,7 @@ export class Switch extends Node {
         if (incomingInterface && packet.srcMAC) {
             this.learnMAC(packet.srcMAC, incomingInterface);
         }
-
+        
         if (packet.dstMAC) {
             const targetInterface = this.lookupMAC(packet.dstMAC);
             if (targetInterface && targetInterface.id !== incomingInterface?.id) {
@@ -84,23 +86,16 @@ export class Switch extends Node {
      * @param srcMAC - The source MAC address of the packet
      * @param incomingInterface - The interface where the packet was received
      */
-    private learnMAC(srcMAC: string, incomingInterface: NetworkInterface): void {
-        if (srcMAC === "FF:FF:FF:FF:FF:FF") return;
+    public learnMAC(srcMAC: string, incomingInterface: NetworkInterface): void {
+        if(!NetworkInterface.isValidMAC(srcMAC))
+            throw new Error(`Invalid source MAC address: ${srcMAC}`);
+        if(this._macTable.has(srcMAC) || srcMAC === "FF:FF:FF:FF:FF:FF") return;
         
         this._macTable.set(srcMAC, {
             mac: srcMAC,
             interfaceId: incomingInterface.id,
             timestamp: Date.now()
         });
-    }
-
-    /**
-     * Manually add a MAC table entry (for initialization/testing)
-     * @param mac - MAC address to learn
-     * @param iface - Interface where this MAC was learned
-     */
-    public addMACEntry(mac: string, iface: NetworkInterface): void {
-        this.learnMAC(mac, iface);
     }
 
     /**
@@ -119,5 +114,16 @@ export class Switch extends Node {
         }
 
         return this.interfaces.find(iface => iface.id === entry.interfaceId) || null;
+    }
+
+    /**
+     * Clean the MAC table of expired entries
+     */
+    private cleanMACTable(): void {
+        const now = Date.now();
+        for (const [mac, entry] of this._macTable.entries()) {
+            if (now - entry.timestamp > this.MAC_TABLE_TIMEOUT)
+                this._macTable.delete(mac);
+        }
     }
 }

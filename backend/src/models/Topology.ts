@@ -13,7 +13,7 @@ import type { ARPEntry } from './Host.js';
 interface PacketInFlight {
     packet: Packet;
     currentNode: Node;
-    currentInterface?: NetworkInterface; // Interface the packet arrived on (if any)
+    currentInterface?: NetworkInterface; // interface the packet arrived on, if any
 }
 
 /**
@@ -21,7 +21,7 @@ interface PacketInFlight {
  */
 interface NextHopInfo {
     nextNode: Node;
-    nextInterface: NetworkInterface; // Interface on the next node where packet arrives
+    nextInterface: NetworkInterface; // interface on the next node where packet arrives
     viaLink: Link;
 }
 
@@ -30,7 +30,7 @@ interface NextHopInfo {
  */
 interface PendingPacket {
     originalPacket: Packet;
-    sourceHost: Host;
+    sourceNode: Host | Router;
     sourceInterface: NetworkInterface;
     awaitingIp: string;
 }
@@ -99,9 +99,7 @@ export class Topology {
         if (intfA.parentNode && intfB.parentNode && intfA.parentNode === intfB.parentNode)
             throw new Error(`Cannot create link: both interfaces belong to the same node (${intfA.parentNode.name})`);
         
-        const exists = this.links.find(link =>
-            link.involvesInterface(intfA) || link.involvesInterface(intfB)
-        );
+        const exists = this.links.find(link => link.involvesInterface(intfA) || link.involvesInterface(intfB));
         if (exists)
             throw new Error(`Cannot create link: one or both interfaces are already linked`);
 
@@ -164,7 +162,7 @@ export class Topology {
 
         this.pendingPackets.push({
             originalPacket: packet,
-            sourceHost,
+            sourceNode: sourceHost,
             sourceInterface,
             awaitingIp: targetIp
         });
@@ -251,6 +249,7 @@ export class Topology {
         const routers = this.nodes.filter(node => node.type === NodeType.ROUTER) as Router[];
         const switches = this.nodes.filter(node => node.type === NodeType.SWITCH) as Switch[];
 
+        // Populate host-to-host in same subnet
         for (const host of hosts) {
             for (const hostInterface of host.getInterfaces()) {
                 for (const otherHost of hosts) {
@@ -261,6 +260,8 @@ export class Topology {
                         }
                     }
                 }
+                
+                // Populate host-to-router in same subnet
                 for (const router of routers) {
                     for (const routerInterface of router.getInterfaces()) {
                         if (hostInterface.isInSubnet(routerInterface.ip)) {
@@ -272,6 +273,33 @@ export class Topology {
             }
         }
 
+        // Populate router-to-router ARP entries
+        for (const router of routers) {
+            for (const routerInterface of router.getInterfaces()) {
+                // Learn all hosts reachable through this interface
+                for (const host of hosts) {
+                    for (const hostInterface of host.getInterfaces()) {
+                        if (routerInterface.isInSubnet(hostInterface.ip)) {
+                            router.addARPEntry(hostInterface.ip, hostInterface.mac);
+                        }
+                    }
+                }
+                
+                // learn other routers in same subnet
+                for (const otherRouter of routers) {
+                    if (otherRouter === router) continue;
+                    for (const otherInterface of otherRouter.getInterfaces()) {
+                        if (routerInterface.isInSubnet(otherInterface.ip)) {
+                            router.addARPEntry(otherInterface.ip, otherInterface.mac);
+                            // Also add reverse entry
+                            otherRouter.addARPEntry(routerInterface.ip, routerInterface.mac);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Populate switch MAC tables
         for (const sw of switches) {
             for (const swInterface of sw.getInterfaces()) {
                 const link = this.links.find(l => l.involvesInterface(swInterface));
@@ -349,7 +377,7 @@ export class Topology {
                 if (currentNode instanceof Host || currentNode instanceof Router) {
                     const reply = currentNode.receivePacket(packet);
                     
-                     if (isAtDestination) {
+                    if (isAtDestination) {
                         this.deliveredPackets.set(packet.dstIp + '-' + currentNode.name, packet);
                         console.log(`✓ Packet ${packet.id} reached destination ${currentNode.name}`);
                     }
@@ -369,13 +397,39 @@ export class Topology {
                 if (isAtDestination) continue;
             }
 
-            const nextHops = this.findAllNextHops(packetInFlight);
+            const nextHops: NextHopInfo[] = this.findAllNextHops(packetInFlight);
 
+            // if router ARP miss
+            if (nextHops.length === 0 && currentNode instanceof Router && packet.protocol !== Protocol.ARP) {
+                const arpInfo = currentNode.needsArpResolution(packet.dstIp);
+                
+                if (arpInfo.needed && arpInfo.outInterface) {
+                    // Send ARP request
+                    const arpRequest = currentNode.sendARPrequest(arpInfo.targetIp, arpInfo.outInterface);
+                    newPacketsInFlight.push({
+                        packet: arpRequest,
+                        currentNode
+                    });
+                    
+                    this.pendingPackets.push({
+                        originalPacket: packet,
+                        sourceNode: currentNode as Router,
+                        sourceInterface: arpInfo.outInterface,
+                        awaitingIp: arpInfo.targetIp
+                    });
+                    
+                    console.log(`Router ${currentNode.name}: ARP miss, queued packet for ${arpInfo.targetIp}`);
+                    continue;
+                }
+            }
+
+            // Drop packets with no route
             if (nextHops.length === 0) {
                 console.log(`Packet ${packet.id} dropped at ${currentNode.name} (no route)`);
                 continue;
             }
 
+            // forward packet
             if (nextHops.length === 1) {
                 const hop = nextHops[0]!;
                 newPacketsInFlight.push({
@@ -403,14 +457,16 @@ export class Topology {
             for (let i = 0; i < this.pendingPackets.length; i++) {
                 const pending = this.pendingPackets[i];
                 if (pending) {
-                    const mac = pending.sourceHost.getARPCache().get(pending.awaitingIp)?.mac;
+                    const cache = pending.sourceNode.getARPCache();
+                    const mac = cache.get(pending.awaitingIp)?.mac;
+                    
                     if (mac) {
                         pending.originalPacket.dstMAC = mac;
                         newPacketsInFlight.push({
                             packet: pending.originalPacket,
-                            currentNode: pending.sourceHost,
+                            currentNode: pending.sourceNode,
                         });
-                        console.log(`=> ARP resolved for ${pending.awaitingIp}, sending queued packet.`);
+                        console.log(`=> ARP resolved for ${pending.awaitingIp}, sending queued packet from ${pending.sourceNode.name}`);
                         resolved.push(i);
                     }
                 }
