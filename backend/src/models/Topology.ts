@@ -1,11 +1,11 @@
-import { Node, NodeType } from './Node.js';
-import { Link } from './Link.js';
-import { NetworkInterface } from './NetworkInterface.js';
-import { Packet, Protocol } from './Packet.js';
-import { Host } from './Host.js';
-import { Router } from './Router.js';
-import { Switch } from './Switch.js';
-import type { ARPEntry } from './Host.js';
+import { Node, NodeType } from "./Node.js";
+import { Link } from "./Link.js";
+import { NetworkInterface } from "./NetworkInterface.js";
+import { Packet, Protocol } from "./Packet.js";
+import { Host } from "./Host.js";
+import { Router } from "./Router.js";
+import { Switch } from "./Switch.js";
+import type { ARPEntry } from "./Host.js";
 
 /**
  * Represents a packet in transit within the topology
@@ -242,7 +242,7 @@ export class Topology {
 
     /**
      * Populate ARP tables for all hosts and routers in the topology
-     * it's used to simplify packet analysis and remove ARP packet from the equasion
+     * it"s used to simplify packet analysis and remove ARP packet from the equasion
      */
     populateARPCaches(): void {
         const hosts = this.nodes.filter(node => node.type === NodeType.HOST) as Host[];
@@ -314,7 +314,7 @@ export class Topology {
     }
 
     /**
-     * Get a host's ARP cache by name
+     * Get a host"s ARP cache by name
      * @param hostName - Name of the host
      * @returns Map of IP => ARPEntry or null if host not found
      */
@@ -378,7 +378,7 @@ export class Topology {
                     const reply = currentNode.receivePacket(packet);
                     
                     if (isAtDestination) {
-                        this.deliveredPackets.set(packet.dstIp + '-' + currentNode.name, packet);
+                        this.deliveredPackets.set(packet.dstIp + "-" + currentNode.name, packet);
                         console.log(`✓ Packet ${packet.id} reached destination ${currentNode.name}`);
                     }
 

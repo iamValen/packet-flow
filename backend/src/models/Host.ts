@@ -1,7 +1,7 @@
-import { Node, NodeType } from './Node.js';
-import { NetworkInterface } from './NetworkInterface.js';
-import { ARPpayloadType, Packet, type ARPpayload } from './Packet.js';
-import { Protocol } from './Packet.js';
+import { Node, NodeType } from "./Node.js";
+import { NetworkInterface } from "./NetworkInterface.js";
+import { ARPpayloadType, Packet, type ARPpayload } from "./Packet.js";
+import { Protocol } from "./Packet.js";
 
 /**
  * Represents a single ARP cache entry
@@ -48,7 +48,7 @@ export class Host extends Node {
 
     /**
      * Select the network interface used to reach a given destination IP.
-     * If destination is local, return its subnet interface; otherwise use gateway's interface.
+     * If destination is local, return its subnet interface; otherwise use gateway"s interface.
      * @param dstIp - Destination IP address
      * @returns Selected NetworkInterface or null if unreachable
      */
@@ -118,7 +118,7 @@ export class Host extends Node {
     }
 
     /**
-     * Return a copy of the host's ARP cache
+     * Return a copy of the host"s ARP cache
      * @returns Map of IP => ARPEntry
      */
     getARPCache(): Map<string, ARPEntry> {
@@ -228,7 +228,7 @@ export class Host extends Node {
         const isForOurMAC = packet.dstMAC === targetInterface.mac;
         if (!isBroadcast && !isForOurMAC) return null;
 
-        console.log(`Host ${this.name} received ICMP from ${packet.srcIp}: ${packet.payload || 'ICMP Echo'}`);
+        console.log(`Host ${this.name} received ICMP from ${packet.srcIp}: ${packet.payload || "ICMP Echo"}`);
 
         if (packet.protocol === Protocol.ICMP && packet.payload === "ICMP Echo Request") {
             const reply = new Packet(

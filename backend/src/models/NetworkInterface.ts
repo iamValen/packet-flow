@@ -1,4 +1,4 @@
-import type { Node } from './Node.js';
+import type { Node } from "./Node.js";
 
 /**
  * Represents a single Network Interface of a device (Node)
@@ -45,11 +45,11 @@ export class NetworkInterface {
      * @returns Mac address
     */
     static generateMAC(): string {
-        const hexDigits = '0123456789ABCDEF';
+        const hexDigits = "0123456789ABCDEF";
 
-        let mac = '';
+        let mac = "";
         for (let i = 0; i < 6; i++) {
-           if (i > 0) mac += ':';
+           if (i > 0) mac += ":";
            mac += hexDigits[Math.floor(Math.random() * 16)];
            mac += hexDigits[Math.floor(Math.random() * 16)];
         }
@@ -63,7 +63,7 @@ export class NetworkInterface {
      * @returns NetworkInterface created
     */
     static fromCIDR(cidrNotation: string, mac?: string): NetworkInterface {
-        const [ip, prefix] = cidrNotation.split('/');
+        const [ip, prefix] = cidrNotation.split("/");
         if(ip == undefined || prefix == undefined) 
             throw new Error(`Invalid CIDR notation IP: ${cidrNotation}`);
         const cidr = parseInt(prefix, 10);
@@ -139,10 +139,10 @@ export class NetworkInterface {
      * @returns the network address for this interface
      */
     getNetworkAddress(): string {
-        const ipParts: number[] = this._ip.split('.').map((n: string): number => parseInt(n, 10));
-        const maskParts: number[] = this._mask.split('.').map((n: string): number => parseInt(n, 10));
+        const ipParts: number[] = this._ip.split(".").map((n: string): number => parseInt(n, 10));
+        const maskParts: number[] = this._mask.split(".").map((n: string): number => parseInt(n, 10));
         const network: number[] = ipParts.map((part: number, i: number) => part & (maskParts[i] ?? 0)); // bitwise AND
-        return network.join('.');
+        return network.join(".");
     }
 
     /**
@@ -151,8 +151,8 @@ export class NetworkInterface {
      * @returns the broadcast address for the interface
      */
     getBroadcastAddress(): string {
-        const ipParts: number[] = this._ip.split('.').map((n: string): number => parseInt(n, 10));
-        const maskParts: number[] = this._mask.split('.').map((n: string): number => parseInt(n, 10));
+        const ipParts: number[] = this._ip.split(".").map((n: string): number => parseInt(n, 10));
+        const maskParts: number[] = this._mask.split(".").map((n: string): number => parseInt(n, 10));
         
         const broadcastParts: number[] = ipParts.map((ip: number, i: number): number => 
             ip | (~(maskParts[i] ?? 0) & 255)
@@ -172,9 +172,9 @@ export class NetworkInterface {
     isInSubnet(ip: string): boolean {
         if(!NetworkInterface.isValidIP(ip))
             throw new Error(`Invalid IP: ${ip}`);
-        const ipParts: number[] = ip.split('.').map((n: string): number => parseInt(n, 10));
-        const networkParts: number[] = this.getNetworkAddress().split('.').map((n: string): number => parseInt(n, 10));
-        const maskParts: number[] = this._mask.split('.').map((n: string): number => parseInt(n, 10));
+        const ipParts: number[] = ip.split(".").map((n: string): number => parseInt(n, 10));
+        const networkParts: number[] = this.getNetworkAddress().split(".").map((n: string): number => parseInt(n, 10));
+        const maskParts: number[] = this._mask.split(".").map((n: string): number => parseInt(n, 10));
         
         for (let i = 0; i < 4; i++) {
             if (((ipParts[i] ?? 0) & (maskParts[i] ?? 0)) !== networkParts[i])
@@ -192,8 +192,8 @@ export class NetworkInterface {
     static maskToCidr(mask: string): number {
         if(!NetworkInterface.isValidSubnetMask(mask))
             throw new Error(`Invalid mask: ${mask}`);
-        const maskParts = mask.split('.').map(Number);
-        const binaryMask: string = maskParts.map(part => part.toString(2).padStart(8, '0')).join('');
+        const maskParts = mask.split(".").map(Number);
+        const binaryMask: string = maskParts.map(part => part.toString(2).padStart(8, "0")).join("");
 
         let count: number = 0;
         for (const bit of binaryMask)

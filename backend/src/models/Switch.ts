@@ -1,6 +1,6 @@
-import { Node, NodeType } from './Node.js';
-import { NetworkInterface } from './NetworkInterface.js';
-import { Packet } from './Packet.js';
+import { Node, NodeType } from "./Node.js";
+import { NetworkInterface } from "./NetworkInterface.js";
+import { Packet } from "./Packet.js";
 
 /**
  * Internal structure that represents an entry in the MAC address table

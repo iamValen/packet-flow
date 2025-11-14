@@ -1,7 +1,7 @@
-import { Node, NodeType } from './Node.js';
-import { NetworkInterface } from './NetworkInterface.js';
-import { Packet, Protocol, type ARPpayload, ARPpayloadType } from './Packet.js';
-import type { ARPEntry } from './Host.js';
+import { Node, NodeType } from "./Node.js";
+import { NetworkInterface } from "./NetworkInterface.js";
+import { Packet, Protocol, type ARPpayload, ARPpayloadType } from "./Packet.js";
+import type { ARPEntry } from "./Host.js";
 
 /**
  * Firewall action type
@@ -323,9 +323,9 @@ export class Router extends Node {
      * @returns True if IP is in network, false otherwise
      */
     private ipMatchesRoute(ip: string, network: string, mask: string): boolean {
-        const ipParts = ip.split('.').map(Number);
-        const netParts = network.split('.').map(Number);
-        const maskParts = mask.split('.').map(Number);
+        const ipParts = ip.split(".").map(Number);
+        const netParts = network.split(".").map(Number);
+        const maskParts = mask.split(".").map(Number);
 
         for (let i = 0; i < 4; i++) {
             if ((ipParts[i]! & maskParts[i]!) !== (netParts[i]! & maskParts[i]!)) return false;
@@ -441,7 +441,7 @@ export class Router extends Node {
         
         // Determine next hop IP
         // If destination is in the same subnet as outInterface, next hop is the destination itself
-        // if not, we'd need to look up next-hop router (but for directly connected networks, it's the destination)
+        // if not, we"d need to look up next-hop router (but for directly connected networks, it"s the destination)
         const nextHopIp = packet.dstIp;
         const nextHopMAC = this.lookupARP(nextHopIp);
 
