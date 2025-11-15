@@ -1,3 +1,21 @@
+enum NodeType {
+  HOST
+  ROUTER
+  SWITCH
+}
+
+enum ProtocolType {
+  TCP
+  UDP
+  ICMP
+  ARP
+}
+
+enum Action {
+  ALLOW
+  DROP
+}
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -26,11 +44,12 @@ model Topology {
 model Node {
   id          String   @id @default(uuid()) @db.Uuid
   name        String   @db.VarChar(255)
-  type        String   @db.VarChar(50) // "HOST" | "ROUTER" | "SWITCH" | "FIREWALL"
+  type        NodeType
   positionX   Float    @db.DoublePrecision
   positionY   Float    @db.DoublePrecision
   createdAt   DateTime @default(now()) @db.Timestamptz
   updatedAt   DateTime @updatedAt @db.Timestamptz
+  defaultGateway String?
   
   // Foreign Keys
   topologyId  String   @db.Uuid
@@ -54,9 +73,11 @@ model NetworkInterface {
   mask      String   @db.VarChar(15)
   cidr      Int      @db.SmallInt
   mac       String   @db.VarChar(17)  // MAC format: XX:XX:XX:XX:XX:XX
+  networkAddress   String   @db.VarChar(15)
+  broadcastAddress String   @db.VarChar(15)
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
-  
+
   // Foreign Keys
   nodeId    String   @db.Uuid
   node      Node     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
@@ -120,8 +141,8 @@ model FirewallRule {
   id        String   @id @default(uuid()) @db.Uuid
   srcIp     String   @db.VarChar(15)  // "any" or specific IP
   dstIp     String   @db.VarChar(15)  // "any" or specific IP
-  protocol  String?  @db.VarChar(10)  // "ICMP" | "TCP" | "UDP" | null
-  action    String   @db.VarChar(10)  // "ALLOW" | "DROP"
+  protocol  ProtocolType? // "ICMP" | "TCP" | "UDP" | null
+  action    Action // "ALLOW" | "DROP"
   priority  Int      @db.Integer
   createdAt DateTime @default(now()) @db.Timestamptz
   

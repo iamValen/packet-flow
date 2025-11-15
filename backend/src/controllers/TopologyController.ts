@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { StatusCodes } from "http-status-codes";
+import { NodeType } from "../models/Node.js";
 
 const prisma = new PrismaClient();
 
@@ -263,12 +264,12 @@ export const deleteTopology = async (req: Request, res: Response) => {
         });
     }
 };
-
+ 
 /**
- * POST /api/topologies/:id/duplicate
- * Duplicate an existing topology
+ * GET /api/topologies/:id/nodes
+ * Get all nodes in a topology
  */
-export const duplicateTopology = async (req: Request, res: Response) => {
+export const getTopologyNodes = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         if(!id) {
@@ -277,53 +278,47 @@ export const duplicateTopology = async (req: Request, res: Response) => {
                 error: "Topology ID is required"
             });
         }
-        // Fetch original topology with all data
-        const original = await prisma.topology.findUnique({
-        where: { id },
-        include: {
-            nodes: {
+
+        const topology = await prisma.topology.findUnique({
+            where: { id }
+        });
+
+        if(!topology) {
+            return res.status(StatusCodes.NOT_FOUND).json({
+                success: false,
+                error: "Topology not found"
+            });
+        }
+
+        const nodes = await prisma.node.findMany({
+            where: { topologyId: id },
             include: {
                 interfaces: true,
-                firewallRules: true,
-                routingEntries: {
-                include: {
-                    nextHopInterface: true
+                _count: {
+                    select: {
+                        interfaces: true,
+                        firewallRules: true,
+                        routingEntries: true
+                    }
                 }
-                }
-            }
             },
-            links: true
-        }
+            orderBy: {
+                createdAt: 'asc'
+            }
         });
-
-        if (!original) {
-        return res.status(404).json({
-            success: false,
-            error: "Topology not found"
-        });
-        }
-
-        // Create duplicate with all nodes and links
-        // Note: This is a simplified version - you may need to handle
-        // interface/route relationships more carefully
-        const duplicate = await prisma.topology.create({
-            data: {
-                name: `${original.name} (Copy)`,
-                description: original.description
-            } 
-        });
-
-        res.status(201).json({
+        res.json({
             success: true,
-            message: "Topology duplicated successfully",
-            topology: duplicate
+            topologyId: id,
+            topologyName: topology.name,
+            count: nodes.length,
+            nodes
         });
     } catch (error: any) {
-        console.error("Error duplicating topology:", error);
-        res.status(500).json({
-        success: false,
-        error: "Failed to duplicate topology",
-        message: error.message
+        console.error('Error fetching topology nodes:', error);
+        res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
+            success: false,
+            error: 'Failed to fetch topology nodes',
+            message: error.message
         });
     }
-};
+}
