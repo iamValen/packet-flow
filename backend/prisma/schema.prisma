@@ -25,6 +25,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model users {
+  id          String   @id @db.Uuid @unique
+  password    String   @db.VarChar(255)
+  email       String   @db.VarChar(255) 
+}
+
 model Topology {
   id          String   @id @default(uuid()) @db.Uuid
   name        String   @db.VarChar(255)
@@ -69,10 +75,10 @@ model Node {
 
 model NetworkInterface {
   id        String   @id @default(uuid()) @db.Uuid
-  ip        String   @db.VarChar(15)  // IPv4 max length: XXX.XXX.XXX.XXX
+  ip        String   @db.VarChar(15)
   mask      String   @db.VarChar(15)
   cidr      Int      @db.SmallInt
-  mac       String   @db.VarChar(17)  // MAC format: XX:XX:XX:XX:XX:XX
+  mac       String   @db.VarChar(17)
   networkAddress   String   @db.VarChar(15)
   broadcastAddress String   @db.VarChar(15)
   createdAt DateTime @default(now()) @db.Timestamptz
