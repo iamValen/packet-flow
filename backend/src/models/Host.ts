@@ -5,7 +5,7 @@ import { Protocol } from "./Packet.js";
 
 /**
  * Represents a single ARP cache entry
- * Each entry stores a MAC address and its timestamp for aging out old records
+ * each entry stores a MAC address and its timestamp to delete old entries
  */
 export type ARPEntry = {
     mac: string;       // mac address
@@ -13,9 +13,9 @@ export type ARPEntry = {
 };
 
 /**
- * Represents a host node in the network.
- * Hosts are end devices that can send and receive packets but cannot forward them like routers or switches.
- * Each host can have one or more network interfaces, an ARP cache, and an optional default gateway.
+ * Represents a host node in the network
+ * Hosts are end devices that can send and receive packets but cannot forward them like routers or switches
+ * Each host can have one or more network interfaces, an ARP cache, and an optional default gateway
  */
 export class Host extends Node {
     readonly type: NodeType = NodeType.HOST;

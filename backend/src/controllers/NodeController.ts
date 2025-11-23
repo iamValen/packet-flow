@@ -57,7 +57,6 @@ export const getAllNodes = async (req: Request, res: Response) => {
                 createdAt: 'asc'
             }
         });
-
         res.json({
             success: true,
             topologyId,

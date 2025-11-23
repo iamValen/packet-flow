@@ -1,7 +1,7 @@
 import type { Node } from "./Node.js";
 
 /**
- * Represents a single Network Interface of a device (Node)
+ * Represents a NIC for devices (router, host, switch)
  */
 export class NetworkInterface {
     readonly id: string;

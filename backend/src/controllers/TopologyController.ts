@@ -124,10 +124,10 @@ export const createTopology = async (req: Request, res: Response) => {
         const { name, description } = req.body;
 
         if (!name || name.trim().length === 0) {
-        return res.status(StatusCodes.BAD_REQUEST).json({
-            success: false,
-            error: "Topology name is required"
-        });
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                error: "Topology name is required"
+            });
         }
 
         const topology = await prisma.topology.create({
