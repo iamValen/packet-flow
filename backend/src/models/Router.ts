@@ -5,8 +5,8 @@ import type { ARPEntry } from "./Host.js";
 
 /**
  * Firewall action type
- * ALLOW = packet passes through
- * DROP = packet blocked
+ * ALLOW = accept packet
+ * DROP = block packet
  */
 const FirewallAction = {
     ALLOW: "ALLOW",
@@ -17,7 +17,7 @@ type FirewallAction = (typeof FirewallAction)[keyof typeof FirewallAction];
 /**
  * Represents a firewall rule entry
  */
-export type FirewallRule = {
+export interface FirewallRule {
     id: string;
     srcIp: string;
     dstIp: string;
@@ -29,21 +29,21 @@ export type FirewallRule = {
 /**
  * Represents a routing table entry
  */
-export type RouteEntry = {
-    destination: string;               // Destination network prefix
-    mask: string;                      // Subnet mask
-    cidr: number;                      // CIDR equivalent
+export interface RouteEntry {
+    destination: string;                // Destination network (ex. 192.168.0.0)
+    mask: string;                       
+    cidr: number;                       // CIDR equivalent
     nextHopInterface: NetworkInterface; // Outgoing interface for the route
-    isDefault: boolean;                // True if this is default route (0.0.0.0/0)
+    isDefault: boolean;                 // True if this is default route (0.0.0.0/0)
 };
 
 /**
- * Router node capable of forwarding packets, managing ARP cache, and applying firewall rules
+ * Router node can forward packets, manage ARP cache, and apply firewall rules
  */
 export class Router extends Node {
     readonly type: NodeType = NodeType.ROUTER;
 
-    routingTable: RouteEntry[];                  // List of routing entries
+    routingTable: RouteEntry[];
     private _arpCache: Map<string, ARPEntry>;    // ARP cache: IP => MAC
     private readonly ARP_CACHE_TIMEOUT = 300_000; // ARP cache expiration in ms (5 min)
 
@@ -281,10 +281,9 @@ export class Router extends Node {
     addRoute(destination: string, mask: string, nextHopInterface: NetworkInterface): void {
         if (!NetworkInterface.isValidIP(destination) || !NetworkInterface.isValidSubnetMask(mask))
             throw new Error(`Invalid network or mask: ${destination}/${mask}`);
-
         if (!this.interfaces.includes(nextHopInterface))
             throw new Error(`Next-hop interface does not belong to router ${this.name}`);
-
+        // already registered
         if (this.routingTable.some(r => r.destination === destination && r.mask === mask))
             throw new Error(`Route ${destination}/${mask} already exists`);
 

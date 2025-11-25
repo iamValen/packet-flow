@@ -171,37 +171,10 @@ model SimulationSession {
   updatedAt       DateTime @updatedAt @db.Timestamptz
 
   // Relations
-  topology   Topology            @relation(fields: [topologyId], references: [id], onDelete: Cascade)
-  topologyId String              @db.Uuid
-  packets    SimulationPacket[]
+  topology   Topology @relation(fields: [topologyId], references: [id], onDelete: Cascade)
+  topologyId String   @db.Uuid
 
   @@map("simulation_sessions")
   @@index([topologyId])
   @@index([status])
-}
-
-model SimulationPacket {
-  id            String   @id @default(uuid()) @db.Uuid
-  packetId      String   // Original packet UUID from simulation
-  srcIp         String   @db.VarChar(15)
-  dstIp         String   @db.VarChar(15)
-  srcMAC        String   @db.VarChar(17)
-  dstMAC        String?  @db.VarChar(17)
-  protocol      String   @db.VarChar(10)
-  payload       String?  @db.Text
-  ttl           Int      @db.SmallInt
-  step          Int      // Which simulation step this packet was captured at
-  history       String[] // Array of node IDs the packet traversed
-  currentNodeId String   @db.Uuid
-  timestamp     DateTime @db.Timestamptz
-  createdAt     DateTime @default(now()) @db.Timestamptz
-
-  // Relations
-  session   SimulationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  sessionId String            @db.Uuid
-
-  @@map("simulation_packets")
-  @@index([sessionId])
-  @@index([step])
-  @@index([packetId])
 }

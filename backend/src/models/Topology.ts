@@ -7,27 +7,24 @@ import { Router } from "./Router.js";
 import { Switch } from "./Switch.js";
 import type { ARPEntry } from "./Host.js";
 
-/**
+/*
  * Represents a packet in transit within the topology
  */
 interface PacketInFlight {
     packet: Packet;
     currentNode: Node;
-    currentInterface?: NetworkInterface; // interface the packet arrived on, if any
+    currentInterface?: NetworkInterface; // interface the packet arrived on
 }
 
-/**
- * Represents information for the next hop of a packet
- */
+// Represents information for the next hop of a packet
+
 interface NextHopInfo {
     nextNode: Node;
     nextInterface: NetworkInterface; // interface on the next node where packet arrives
     viaLink: Link;
 }
 
-/**
- * Represents a packet waiting for ARP resolution
- */
+// Represents a packet waiting for ARP resolution
 interface PendingPacket {
     originalPacket: Packet;
     sourceNode: Host | Router;
@@ -209,6 +206,10 @@ export class Topology {
 
         if (currentNode instanceof Host) {
             if (currentInterface) return [];
+            else {
+                packet.decrementTTL();
+                if (packet.isExpired()) return [];
+            }
             const sendInterface = currentNode.getInterfaces().find(iface => 
                 iface.isInSubnet(packet.dstIp) || 
                 (currentNode.defaultGateway && iface.isInSubnet(currentNode.defaultGateway))
@@ -244,7 +245,7 @@ export class Topology {
      * Populate ARP tables for all hosts and routers in the topology
      * it"s used to simplify packet analysis and remove ARP packet from the equasion
      */
-    populateARPCaches(): void {
+    fillARP(): void {
         const hosts = this.nodes.filter(node => node.type === NodeType.HOST) as Host[];
         const routers = this.nodes.filter(node => node.type === NodeType.ROUTER) as Router[];
         const switches = this.nodes.filter(node => node.type === NodeType.SWITCH) as Switch[];
@@ -261,7 +262,7 @@ export class Topology {
                     }
                 }
                 
-                // Populate host-to-router in same subnet
+                // host-to-router in same subnet
                 for (const router of routers) {
                     for (const routerInterface of router.getInterfaces()) {
                         if (hostInterface.isInSubnet(routerInterface.ip)) {
@@ -273,10 +274,10 @@ export class Topology {
             }
         }
 
-        // Populate router-to-router ARP entries
+        // router to router ARP entries
         for (const router of routers) {
             for (const routerInterface of router.getInterfaces()) {
-                // Learn all hosts reachable through this interface
+                // learn all hosts reachable through this interface
                 for (const host of hosts) {
                     for (const hostInterface of host.getInterfaces()) {
                         if (routerInterface.isInSubnet(hostInterface.ip)) {
@@ -291,7 +292,6 @@ export class Topology {
                     for (const otherInterface of otherRouter.getInterfaces()) {
                         if (routerInterface.isInSubnet(otherInterface.ip)) {
                             router.addARPEntry(otherInterface.ip, otherInterface.mac);
-                            // Also add reverse entry
                             otherRouter.addARPEntry(routerInterface.ip, routerInterface.mac);
                         }
                     }
@@ -339,7 +339,7 @@ export class Topology {
 
         if (autoPopulateARP) {
             console.warn("Running in Simple Mode - ARP caches pre-populated");
-            this.populateARPCaches();
+            this.fillARP();
         }
 
         while (this.packetsInFlight.length > 0 && this.simulationRunning) {

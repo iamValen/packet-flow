@@ -110,7 +110,7 @@ export class SimulationBuilder {
         }
 
         if (autoPopulateARP) {
-            topology.populateARPCaches();
+            topology.fillARP();
         }
 
         return { topology, nodeMap, interfaceMap };
