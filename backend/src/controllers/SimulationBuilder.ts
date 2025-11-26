@@ -79,7 +79,7 @@ export class SimulationBuilder {
             topology.addNode(node);
             nodeMap.set(dbNode.id, node);
 
-            // router features
+            // router routing and firewall rules
             if (node instanceof Router) {
                 for (const route of dbNode.routingEntries) {
                     const nextHopInterface = interfaceMap.get(route.nextHopInterfaceId);
