@@ -5,7 +5,6 @@ import { Host } from "../models/Host.js";
 import { Router } from "../models/Router.js";
 import { Switch } from "../models/Switch.js";
 import { Packet, Protocol } from "../models/Packet.js";
-import { Firewall } from "../models/Firewall.js";
 import { Topology } from "../models/Topology.js";
 
 describe("NetworkInterface", () => {
@@ -93,11 +92,22 @@ describe("Host", () => {
   });
 
   it("should generate ICMP reply on receive", () => {
-    const req: Packet = new Packet("192.168.1.3", "192.168.1.2", Protocol.ICMP, "ICMP Echo Request");
+    const hInt: NetworkInterface = new NetworkInterface("192.168.1.2", "255.255.255.0");
+    const host: Host = new Host("HostA", { x: 0, y: 0 }, [hInt]);
+    
+    const req: Packet = new Packet(
+        "192.168.1.3",                    
+        "192.168.1.2",
+        Protocol.ICMP, 
+        "ICMP Echo Request",
+        "AA:BB:CC:DD:EE:FF", // srcMAC
+        hInt.mac // dstMAC (host's MAC)
+    );
+    
     const reply: Packet | null = host.receivePacket(req);
     expect(reply).not.toBeNull();
     expect(reply?.payload).toBe("ICMP Echo Reply");
-  });
+});
 });
 
 describe("Router", () => {
@@ -168,29 +178,31 @@ describe("Switch", () => {
   });
 });
 
-describe("Firewall", () => {
-  const fInt: NetworkInterface = new NetworkInterface("10.1.0.1", "255.255.255.0");
-  const fw: Firewall = new Firewall("FW1", { x: 0, y: 0 }, [fInt]);
+describe("Router Firewall (integrated)", () => {
+  it("should block ICMP packet according to rule", () => {
+    const fw = new Router("R1", { x: 0, y: 0 }, [
+      new NetworkInterface("192.168.1.1", "255.255.255.0"),
+    ]);
 
-  it("should add rules and drop packets accordingly", () => {
-    fw.addRule("10.0.0.1", "10.1.0.2", Protocol.ICMP, "DROP", 1);
-    expect(fw.getRules()).toHaveLength(1);
-    const pkt: Packet = new Packet("10.0.0.1", "10.1.0.2", Protocol.ICMP);
-    const out: NetworkInterface[] = fw.forwardPacket(pkt, fInt);
-    expect(out).toEqual([]);
+    fw.addRule("192.168.1.2", "192.168.1.3", Protocol.ICMP, "DROP", 10);
+
+    const pkt = new Packet("192.168.1.2", "192.168.1.3", Protocol.ICMP, "ICMP Echo Request", "AA:AA:AA:AA:AA:AA", "BB:BB:BB:BB:BB:BB");
+    const output = fw.forwardPacket(pkt, fw.getInterfaces()[0]);
+    expect(output.length).toBe(0);
   });
 
-  it("should allow packets with ALLOW policy", () => {
-    const pkt: Packet = new Packet("10.1.0.1", "10.1.0.2", Protocol.ICMP);
+  it("should allow TCP packet when default policy = ALLOW", () => {
+    const fw = new Router("R1", { x: 0, y: 0 }, [
+      new NetworkInterface("10.0.0.1", "255.255.255.0"),
+    ]);
     fw.setDefaultPolicy("ALLOW");
-    const out: NetworkInterface[] = fw.forwardPacket(pkt, fInt);
-    expect(out.length).toBeGreaterThanOrEqual(0);
-  });
 
-  it("should throw on invalid IPs in rule", () => {
-    expect((): void => fw.addRule("300.0.0.1", "10.0.0.2", Protocol.ICMP, "DROP", 1)).toThrow();
+    const pkt = new Packet("10.0.0.2", "10.0.0.3", Protocol.TCP, "Data", "AA:AA:AA:AA:AA:AA", "BB:BB:BB:BB:BB:BB");
+    const output = fw.forwardPacket(pkt, fw.getInterfaces()[0]);
+    expect(output.length).toBe(1);
   });
 });
+
 
 describe("Topology", () => {
   it("should send and step packets in a simple LAN", () => {
@@ -225,4 +237,109 @@ describe("Topology", () => {
     const ni1: NetworkInterface = new NetworkInterface("10.0.0.1", "255.255.255.0");
     expect((): Link => topo.addLink(ni1, ni1)).toThrow();
   });
+});
+
+describe("🌐 ARP Cache Integration Tests", () => {
+    it("should populate ARP caches for hosts in same subnet", () => {
+        const topo = new Topology("ARPTest");
+        
+        const h1 = new Host("H1", { x: 0, y: 0 }, [
+            new NetworkInterface("192.168.1.2", "255.255.255.0"),
+        ]);
+        
+        const h2 = new Host("H2", { x: 1, y: 0 }, [
+            new NetworkInterface("192.168.1.3", "255.255.255.0"),
+        ]);
+        
+        const sw = new Switch("SW", { x: 0.5, y: 0 }, [
+            new NetworkInterface("0.0.0.0", "255.255.255.0"),
+            new NetworkInterface("0.0.0.0", "255.255.255.0"),
+        ]);
+
+        topo.addNode(h1);
+        topo.addNode(h2);
+        topo.addNode(sw);
+        topo.addLink(h1.interfaces[0]!, sw.interfaces[0]!);
+        topo.addLink(h2.interfaces[0]!, sw.interfaces[1]!);
+        
+        // Populate ARP caches
+        topo.fillARP();
+        
+        // Verify H1 knows H2's MAC
+        const { packet } = h1.sendPacket("192.168.1.3", Protocol.ICMP, "Ping");
+        expect(packet.dstMAC).toBe(h2.interfaces[0]!.mac);
+        expect(packet.dstMAC).not.toBe("FF:FF:FF:FF:FF:FF");
+    });
+
+    it("should learn MAC addresses from received packets", () => {
+        const h1 = new Host("H1", { x: 0, y: 0 }, [
+            new NetworkInterface("192.168.1.2", "255.255.255.0"),
+        ]);
+        
+        const h2 = new Host("H2", { x: 1, y: 0 }, [
+            new NetworkInterface("192.168.1.3", "255.255.255.0"),
+        ]);
+        
+        // H1 doesn't know H2's MAC initially
+        const { packet: req } = h1.sendPacket("192.168.1.3", Protocol.ICMP, "ICMP Echo Request");
+        expect(req.dstMAC).toBe("FF:FF:FF:FF:FF:FF"); // Broadcast
+        
+        // H2 receives the packet and learns H1's MAC
+        const reply = h2.receivePacket(req);
+        expect(reply).not.toBeNull();
+        
+        // Check that H2 learned H1's MAC
+        const h2Cache = h2.getARPCache();
+        expect(h2Cache.has("192.168.1.2")).toBe(true);
+        expect(h2Cache.get("192.168.1.2")?.mac).toBe(h1.interfaces[0]!.mac);
+        
+        // H2's reply should have correct destination MAC
+        expect(reply?.dstMAC).toBe(h1.interfaces[0]!.mac);
+    });
+
+    it("should use broadcast when ARP cache misses", () => {
+        const h1 = new Host("H1", { x: 0, y: 0 }, [
+            new NetworkInterface("192.168.1.2", "255.255.255.0"),
+        ]);
+        
+        // Send without ARP entry
+        const { packet } = h1.sendPacket("192.168.1.99", Protocol.ICMP, "Test");
+        expect(packet.dstMAC).toBe("FF:FF:FF:FF:FF:FF");
+    });
+
+    it("should handle complete ping scenario with ARP learning", () => {
+        const topo = new Topology("PingTest");
+        
+        const h1 = new Host("H1", { x: 0, y: 0 }, [
+            new NetworkInterface("192.168.1.2", "255.255.255.0"),
+        ]);
+        
+        const h2 = new Host("H2", { x: 1, y: 0 }, [
+            new NetworkInterface("192.168.1.3", "255.255.255.0"),
+        ]);
+        
+        const sw = new Switch("SW", { x: 0.5, y: 0 }, [
+            new NetworkInterface("0.0.0.0", "255.255.255.0"),
+            new NetworkInterface("0.0.0.0", "255.255.255.0"),
+        ]);
+
+        topo.addNode(h1);
+        topo.addNode(h2);
+        topo.addNode(sw);
+        topo.addLink(h1.interfaces[0]!, sw.interfaces[0]!);
+        topo.addLink(h2.interfaces[0]!, sw.interfaces[1]!);
+        
+        topo.fillARP();
+        
+        const { packet } = h1.sendPacket("192.168.1.3", Protocol.ICMP, "ICMP Echo Request");
+        
+        expect(packet.srcMAC).toBe(h1.interfaces[0]!.mac);
+        expect(packet.dstMAC).toBe(h2.interfaces[0]!.mac);
+        
+        const h1Cache = topo.getHostARPCache("H1");
+        const h2Cache = topo.getHostARPCache("H2");
+        
+        expect(h1Cache?.has("192.168.1.3")).toBe(true);
+        expect(h2Cache?.has("192.168.1.2")).toBe(true);
+    });
 });

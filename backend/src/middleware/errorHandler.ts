@@ -23,7 +23,7 @@ export const errorHandler = (
     res: Response,
     next: NextFunction
 ) => {
-    console.error("Error occurred:", err.message);
+    console.error("Error:", err.message);
 
     if (err instanceof AppError) {
         return res.status(err.statusCode).json({
@@ -39,7 +39,7 @@ export const errorHandler = (
     return res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
         success: false,
         error: {
-            message: "Something went wrong on the server",
+            message: "Server Error",
             statusCode: StatusCodes.INTERNAL_SERVER_ERROR
         }
     });
