@@ -1,13 +1,13 @@
 import { Router } from "express";
-import { getAllNodes, getNodeById, createNode, updateNode, updateNodePosition, deleteNode } from "../controllers/NodeController.js";
+import NodeController from "../controllers/NodeController.js";
 
 const nodeRouter = Router({ mergeParams: true });
 
-nodeRouter.get("/", getAllNodes);
-nodeRouter.post("/", createNode);
-nodeRouter.get("/:nodeId", getNodeById);
-nodeRouter.put("/:nodeId", updateNode);
-nodeRouter.put("/:nodeId/position", updateNodePosition);
-nodeRouter.delete("/:nodeId", deleteNode);
+nodeRouter.get("/", NodeController.getAllNodes);
+nodeRouter.post("/", NodeController.createNode);
+nodeRouter.get("/:nodeId", NodeController.getNodeById);
+nodeRouter.put("/:nodeId", NodeController.updateNode);
+nodeRouter.put("/:nodeId/position", NodeController.updateNodePosition);
+nodeRouter.delete("/:nodeId", NodeController.deleteNode);
 
 export default nodeRouter;

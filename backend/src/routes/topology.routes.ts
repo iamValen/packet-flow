@@ -1,13 +1,13 @@
 import { Router } from "express";
-import { getAllTopologies, getTopologyById, createTopology, updateTopology, deleteTopology, getTopologyNodes } from "../controllers/TopologyController.js";
+import TopologyController from "../controllers/TopologyController.js";
 
 const router = Router();
 
-router.get("/", getAllTopologies);
-router.get("/:id", getTopologyById);
-router.post("/", createTopology);
-router.put("/:id", updateTopology);
-router.delete("/:id", deleteTopology);
-router.get("/:id/nodes", getTopologyNodes);
+router.get("/", TopologyController.getAllTopologies);
+router.get("/:id", TopologyController.getTopologyById);
+router.post("/", TopologyController.createTopology);
+router.put("/:id", TopologyController.updateTopology);
+router.delete("/:id", TopologyController.deleteTopology);
+router.get("/:id/nodes", TopologyController.getTopologyNodes);
 
 export default router;
