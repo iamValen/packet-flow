@@ -42,11 +42,9 @@ export interface RouteEntry {
  */
 export class Router extends Node {
     readonly type: NodeType = NodeType.ROUTER;
-
     routingTable: RouteEntry[];
     private _arpCache: Map<string, ARPEntry>;    // ARP cache: IP => MAC
     private readonly ARP_CACHE_TIMEOUT = 300_000; // ARP cache expiration in ms (5 min)
-
     private _rules: FirewallRule[] = [];         // List of firewall rules
     private _defaultPolicy: FirewallAction = FirewallAction.ALLOW; // Default firewall policy
 
@@ -82,7 +80,6 @@ export class Router extends Node {
         return this.interfaces;
     }
 
-
     // ARP Methods
 
     /**
@@ -107,7 +104,6 @@ export class Router extends Node {
             this._arpCache.delete(ip);
             return null;
         }
-
         return entry.mac;
     }
 
@@ -171,7 +167,6 @@ export class Router extends Node {
         };
     }
 
-
     // Receive Packets 
 
     /**
@@ -201,7 +196,6 @@ export class Router extends Node {
             reply.logHop(this);
             return reply;
         }
-
         return null;
     }
 
@@ -237,7 +231,6 @@ export class Router extends Node {
                     ourNI.mac,
                     arpPayload.senderMAC
                 );
-
                 reply.logHop(this);
                 return reply;
             }
@@ -268,8 +261,23 @@ export class Router extends Node {
         }
     }
 
-
     // Routing Methods
+
+    /**
+     * Clear all routes from the routing table
+     * Used before auto-configuration
+     */
+    clearRoutes(): void {
+        this.routingTable = [];
+    }
+
+    /**
+     * Get a copy of the routing table
+     * @returns Array of RouteEntry objects
+     */
+    getRoutingTable(): RouteEntry[] {
+        return [...this.routingTable];
+    }
 
     /**
      * Add a static route to the routing table
@@ -281,8 +289,10 @@ export class Router extends Node {
     addRoute(destination: string, mask: string, nextHopInterface: NetworkInterface): void {
         if (!NetworkInterface.isValidIP(destination) || !NetworkInterface.isValidSubnetMask(mask))
             throw new Error(`Invalid network or mask: ${destination}/${mask}`);
+
         if (!this.interfaces.includes(nextHopInterface))
             throw new Error(`Next-hop interface does not belong to router ${this.name}`);
+
         // already registered
         if (this.routingTable.some(r => r.destination === destination && r.mask === mask))
             throw new Error(`Route ${destination}/${mask} already exists`);
@@ -343,7 +353,6 @@ export class Router extends Node {
         return direct || this.lookupRoute(dstIp);
     }
 
-
     // Firewall Methods
 
     /**
@@ -397,6 +406,7 @@ export class Router extends Node {
                 return true;
             }
         }
+
         const allow: boolean = this._defaultPolicy === FirewallAction.ALLOW;
         if(allow)
             console.log(`Router ${this.name}: Firewall (DEFUALT RULE) ALLOWED packet from ${packet.srcIp} => ${packet.dstIp}`);
@@ -404,7 +414,6 @@ export class Router extends Node {
             console.log(`Router ${this.name}: Firewall (DEFUALT RULE) DROPPED packet from ${packet.srcIp} => ${packet.dstIp}`);
         return allow;
     }
-
     
     // Packet Forwarding
 
@@ -417,6 +426,7 @@ export class Router extends Node {
      */
     override forwardPacket(packet: Packet, incomingInterface?: NetworkInterface): NetworkInterface[] {
         packet.decrementTTL();
+
         if (packet.isExpired()) {
             console.log(`Router ${this.name}: Packet ${packet.id} expired`);
             return [];
@@ -431,6 +441,7 @@ export class Router extends Node {
         if (!this.evaluateFirewall(packet)) return [];
 
         const outInterface = this.findOutgoingInterface(packet.dstIp);
+
         if (!outInterface) {
             console.log(`Router ${this.name}: No route to ${packet.dstIp}, dropping packet ${packet.id}`);
             return [];
@@ -440,7 +451,7 @@ export class Router extends Node {
         
         // Determine next hop IP
         // If destination is in the same subnet as outInterface, next hop is the destination itself
-        // if not, we"d need to look up next-hop router (but for directly connected networks, it"s the destination)
+        // if not, wed need to look up next-hop router (but for directly connected networks, its the destination)
         const nextHopIp = packet.dstIp;
         const nextHopMAC = this.lookupARP(nextHopIp);
 

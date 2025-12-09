@@ -17,7 +17,6 @@ interface PacketInFlight {
 }
 
 // Represents information for the next hop of a packet
-
 interface NextHopInfo {
     nextNode: Node;
     nextInterface: NetworkInterface; // interface on the next node where packet arrives
@@ -57,7 +56,6 @@ export class Topology {
         this.packetsInFlight = [];
         this.simulationRunning = false;
     }
-
     
     // Topology management
 
@@ -125,7 +123,6 @@ export class Topology {
         );
     }
 
-
     // Packet simulation
 
     /**
@@ -179,8 +176,6 @@ export class Topology {
         return interfaces.some(iface => iface.ip === packet.dstIp);
     }
 
-
-
     /**
      * Retrieve a delivered packet to a specific node
      * @param destinationNode - Node to check
@@ -220,7 +215,6 @@ export class Topology {
         }
 
         const nextHops: NextHopInfo[] = [];
-
         for (const outInterface of outgoingInterfaces) {
             const link = this.links.find(l => l.involvesInterface(outInterface));
             if (!link) continue;
@@ -238,12 +232,11 @@ export class Topology {
         return nextHops;
     }
 
-
     // ARP / MAC utils
 
     /**
      * Populate ARP tables for all hosts and routers in the topology
-     * it"s used to simplify packet analysis and remove ARP packet from the equasion
+     * it's used to simplify packet analysis and remove ARP packet from the equasion
      */
     fillARP(): void {
         const hosts = this.nodes.filter(node => node.type === NodeType.HOST) as Host[];
@@ -314,7 +307,7 @@ export class Topology {
     }
 
     /**
-     * Get a host"s ARP cache by name
+     * Get a host's ARP cache by name
      * @param hostName - Name of the host
      * @returns Map of IP => ARPEntry or null if host not found
      */
@@ -325,7 +318,6 @@ export class Topology {
 
         return host ? host.getARPCache() : null;
     }
-
 
     // Simulation Control
 
@@ -361,12 +353,10 @@ export class Topology {
         }
 
         console.log(`\n--- Step (${this.packetsInFlight.length} packet(s) in flight) ---`);
-
         const newPacketsInFlight: PacketInFlight[] = [];
 
         for (const packetInFlight of this.packetsInFlight) {
             const { packet, currentNode, currentInterface } = packetInFlight;
-
             const isAtDestination = this.isDestination(packet, currentNode);
             
             const shouldProcessHere = isAtDestination || 
@@ -454,6 +444,7 @@ export class Topology {
         // Resolve pending ARP
         if (this.pendingPackets.length > 0) {
             const resolved: number[] = [];
+
             for (let i = 0; i < this.pendingPackets.length; i++) {
                 const pending = this.pendingPackets[i];
                 if (pending) {
@@ -526,7 +517,18 @@ export class Topology {
     }
 
     /**
-     * Auto-configure routes for all routers based on connected interfaces
+     * Helper: Get network address from IP and mask
+     */
+    private getNetworkAddress(ip: string, mask: string): string {
+        const ipParts = ip.split('.').map(Number);
+        const maskParts = mask.split('.').map(Number);
+        const networkParts = ipParts.map((part, i) => part & (maskParts[i] ?? 0));
+        return networkParts.join('.');
+    }
+
+    /**
+     * Auto-configure directly connected routes for all routers
+     * (Original method - only adds directly connected networks)
      */
     autoConfigureRoutes(): void {
         for (const node of this.nodes) {
@@ -534,23 +536,172 @@ export class Topology {
                 for (const iface of node.getInterfaces()) {
                     const network = iface.getNetworkAddress();
                     const mask = iface.mask;
-                    node.addRoute(network, mask, iface);
+                    try {
+                        node.addRoute(network, mask, iface);
+                    } catch (e) {
+                        // Route already exists, skip
+                    }
                 }
-                console.log(`Auto-configured routes for router ${node.name}`);
+                console.log(`Auto-configured directly connected routes for router ${node.name}`);
             }
         }
     }
 
     /**
-     * Export topology to JSON
-     * @returns Object representing topology
+     * Auto-configure ALL routes for routers using a distance-vector-like algorithm.
+     * This simulates how routes would be learned in a real network (similar to RIP).
+     * 
+     * Steps:
+     * 1. Clear existing routes on all routers
+     * 2. Add directly connected networks
+     * 3. Build adjacency map (which routers connect to which)
+     * 4. Propagate routes between neighboring routers
+     * 5. Add default routes for edge routers (routers with only one neighbor)
      */
-    toJSON(): object {
-        return {
-            id: this.id,
-            name: this.name,
-            nodes: this.nodes.map(n => n.toJSON()),
-            links: this.links.map(l => l.toJSON())
+    autoConfigureAllRoutes(): void {
+        const routers = this.nodes.filter(node => node.type === NodeType.ROUTER) as Router[];
+        
+        if (routers.length === 0) {
+            console.log("No routers in topology, skipping route configuration");
+            return;
+        }
+
+        // Step 1: Clear existing routes on all routers
+        for (const router of routers) {
+            router.clearRoutes();
+        }
+
+        // Step 2: Add directly connected networks to each router
+        for (const router of routers) {
+            for (const iface of router.getInterfaces()) {
+                if (iface.ip && iface.mask) {
+                    const network = this.getNetworkAddress(iface.ip, iface.mask);
+                    try {
+                        router.addRoute(network, iface.mask, iface);
+                    } catch (e) {
+                        // Route already exists
+                    }
+                }
+            }
+        }
+
+        // Step 3: Build adjacency map - find which routers are directly connected
+        // Map: routerId -> [{ neighborRouter, viaOurInterface, neighborInterface }]
+        type Adjacency = { 
+            neighbor: Router; 
+            viaInterface: NetworkInterface;
+            neighborInterface: NetworkInterface;
         };
+        const adjacencyMap = new Map<string, Adjacency[]>();
+
+        for (const router of routers) {
+            adjacencyMap.set(router.id, []);
+        }
+
+        // Check each link to find router-to-router connections
+        for (const link of this.links) {
+            const nodeA = link.interfaceA.parentNode;
+            const nodeB = link.interfaceB.parentNode;
+
+            // Only care about router-to-router links
+            if (nodeA instanceof Router && nodeB instanceof Router) {
+                // Add A -> B
+                adjacencyMap.get(nodeA.id)!.push({
+                    neighbor: nodeB,
+                    viaInterface: link.interfaceA,
+                    neighborInterface: link.interfaceB
+                });
+                // Add B -> A
+                adjacencyMap.get(nodeB.id)!.push({
+                    neighbor: nodeA,
+                    viaInterface: link.interfaceB,
+                    neighborInterface: link.interfaceA
+                });
+            }
+        }
+
+        // Step 4: Propagate routes using distance-vector algorithm
+        // Run multiple iterations to ensure all routes propagate through the network
+        const maxIterations = routers.length + 1;
+
+        for (let iteration = 0; iteration < maxIterations; iteration++) {
+            let changed = false;
+
+            for (const router of routers) {
+                const neighbors = adjacencyMap.get(router.id) || [];
+
+                for (const { neighbor, viaInterface } of neighbors) {
+                    // Learn routes from this neighbor
+                    const neighborRoutes = neighbor.getRoutingTable();
+
+                    for (const route of neighborRoutes) {
+                        // Skip default routes (we'll handle those separately)
+                        if (route.isDefault) continue;
+
+                        // Skip if this network is directly connected to us
+                        const isDirectlyConnected = router.getInterfaces().some(iface => {
+                            const ourNetwork = this.getNetworkAddress(iface.ip, iface.mask);
+                            return ourNetwork === route.destination && iface.mask === route.mask;
+                        });
+
+                        if (isDirectlyConnected) continue;
+
+                        // Check if we already have a route to this network
+                        const existingRoutes = router.getRoutingTable();
+                        const hasRoute = existingRoutes.some(
+                            r => r.destination === route.destination && r.mask === route.mask
+                        );
+
+                        if (!hasRoute) {
+                            // Add route to this network via our interface to the neighbor
+                            try {
+                                router.addRoute(route.destination, route.mask, viaInterface);
+                                changed = true;
+                                console.log(`Router ${router.name}: Learned route to ${route.destination}/${route.mask} via ${neighbor.name}`);
+                            } catch (e) {
+                                // Route exists or invalid
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If no changes in this iteration, routes have converged
+            if (!changed) {
+                console.log(`Routes converged after ${iteration + 1} iteration(s)`);
+                break;
+            }
+        }
+
+        // Step 5: Add default routes for edge routers (routers with only one neighbor router)
+        for (const router of routers) {
+            const neighbors = adjacencyMap.get(router.id) || [];
+
+            // If router has exactly one router neighbor, add default route through it
+            if (neighbors.length === 1) {
+                const { viaInterface } = neighbors[0]!;
+                const existingRoutes = router.getRoutingTable();
+                const hasDefault = existingRoutes.some(r => r.isDefault);
+
+                if (!hasDefault) {
+                    try {
+                        router.addRoute("0.0.0.0", "0.0.0.0", viaInterface);
+                        console.log(`Router ${router.name}: Added default route via ${viaInterface.ip}`);
+                    } catch (e) {
+                        // Default route already exists
+                    }
+                }
+            }
+        }
+
+        // Log final routing tables
+        for (const router of routers) {
+            const routes = router.getRoutingTable();
+            console.log(`\nRouter ${router.name} routing table (${routes.length} routes):`);
+            for (const route of routes) {
+                const prefix = route.isDefault ? "(default) " : "";
+                console.log(`  ${prefix}${route.destination}/${route.cidr} via ${route.nextHopInterface.ip}`);
+            }
+        }
     }
 }
