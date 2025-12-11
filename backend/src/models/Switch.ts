@@ -2,128 +2,84 @@ import { Node, NodeType } from "./Node.js";
 import { NetworkInterface } from "./NetworkInterface.js";
 import { Packet } from "./Packet.js";
 
-/**
- * Internal structure that represents an entry in the MAC address table
- */
-type MACTableEntry = {
-    mac: string; // the MAC address learned
-    interfaceId: string; // the interface ID where the MAC was learned
-    timestamp: number; // Timestamp of when it was learned
-}
+// mac table entry
+type MACEntry = {
+    mac: string;
+    ifaceId: string;
+    timestamp: number;
+};
 
 /**
- * Class that represents a Layer 2 Switch node
- * 
- * Performs MAC learning and intelligent forwarding. 
- * - Learns source MAC addresses dynamically
- * - Floods packets when the destination MAC is unknown
- * - Expires MAC entries after a configurable timeout
+ * layer 2 switch - learns MACs and forwards based on that
+ * floods unknown destinations to all ports
  */
 export class Switch extends Node {
     readonly type: NodeType = NodeType.SWITCH;
+    private macTable: Map<string, MACEntry> = new Map();
+    private readonly MAC_TIMEOUT = 300000;  // 5 min
 
-    private _macTable: Map<string, MACTableEntry>;
-    private readonly MAC_TABLE_TIMEOUT = 300000; // 5 minutes timeout
-
-    /**
-     * Creates a Switch Node object
-     * @param name - Name of the Switch
-     * @param position - x,y position of the switch
-     * @param interfaces - Network interfaces attached to the switch
-     */
     constructor(name: string, position: { x: number; y: number }, interfaces: NetworkInterface[] = []) {
         super(name, position, interfaces);
-        this._macTable = new Map();
     }
 
-    override canForwardPacket(): boolean { return true; }
+    override canForward(): boolean { return true; }
     override getInterfaces(): NetworkInterface[] { return this.interfaces; }
 
-    /**
-     * Forward a packet based on MAC learning and switching logic
-     * - learns the source MAC address and associates it with the incoming port
-     * - if the destination MAC is known then forward out that specific port
-     * - if unknown then flood to all other interfaces
-     * 
-     * @param packet - Packet being forwarded
-     * @param incomingInterface - Interface where the packet arrived
-     * @returns Array of interfaces the packet should be sent out of
-     */
-    override forwardPacket(packet: Packet, incomingInterface?: NetworkInterface): NetworkInterface[] {
-        this.cleanMACTable();
+    // learn a mac on a port
+    learnMAC(mac: string, iface: NetworkInterface): void {
+        if (!NetworkInterface.isValidMAC(mac)) throw new Error(`bad mac: ${mac}`);
+        if (mac === "FF:FF:FF:FF:FF:FF") return;  // dont learn broadcast
+        if (this.macTable.has(mac)) return;
 
-        packet.decrementTTL();
-        if (packet.isExpired()) return [];
-
-        packet.logHop(this);
-
-        // Learn the source MAC address
-        if (incomingInterface && packet.srcMAC) {
-            this.learnMAC(packet.srcMAC, incomingInterface);
-        }
-        
-        if (packet.dstMAC) {
-            const targetInterface = this.lookupMAC(packet.dstMAC);
-            if (targetInterface && targetInterface.id !== incomingInterface?.id) {
-                // known unicast so send directly to target
-                return [targetInterface];
-            }
-        }
-
-        // if not flood the packet to all interfaces except the incoming one 
-        const outInterfaces = this.interfaces.filter(
-            iface => iface.id !== incomingInterface?.id
-        );
-
-        return outInterfaces;
-    }
-
-
-    // MAC Table logic
-
-    /**
-     * Learn a source MAC address and associate it with an incoming interface
-     * @param srcMAC - The source MAC address of the packet
-     * @param incomingInterface - The interface where the packet was received
-     */
-    public learnMAC(srcMAC: string, incomingInterface: NetworkInterface): void {
-        if(!NetworkInterface.isValidMAC(srcMAC))
-            throw new Error(`Invalid source MAC address: ${srcMAC}`);
-        if(this._macTable.has(srcMAC) || srcMAC === "FF:FF:FF:FF:FF:FF") return;
-        
-        this._macTable.set(srcMAC, {
-            mac: srcMAC,
-            interfaceId: incomingInterface.id,
+        this.macTable.set(mac, {
+            mac,
+            ifaceId: iface.id,
             timestamp: Date.now()
         });
     }
 
-    /**
-     * Lookup which interface a MAC address is connected to
-     * @param dstMAC - The destination MAC address to look up
-     * @returns The interface if found and valid, otherwise null
-     */
-    private lookupMAC(dstMAC: string): NetworkInterface | null {
-        const entry = this._macTable.get(dstMAC);
+    // lookup which port has this mac
+    private lookupMAC(mac: string): NetworkInterface | null {
+        const entry = this.macTable.get(mac);
         if (!entry) return null;
-
-        // check expiration
-        if (Date.now() - entry.timestamp > this.MAC_TABLE_TIMEOUT) {
-            this._macTable.delete(dstMAC);
+        if (Date.now() - entry.timestamp > this.MAC_TIMEOUT) {
+            this.macTable.delete(mac);
             return null;
         }
-
-        return this.interfaces.find(iface => iface.id === entry.interfaceId) || null;
+        return this.interfaces.find(i => i.id === entry.ifaceId) || null;
     }
 
-    /**
-     * Clean the MAC table of expired entries
-     */
-    private cleanMACTable(): void {
+    private cleanMAC(): void {
         const now = Date.now();
-        for (const [mac, entry] of this._macTable.entries()) {
-            if (now - entry.timestamp > this.MAC_TABLE_TIMEOUT)
-                this._macTable.delete(mac);
+        for (const [mac, entry] of this.macTable) {
+            if (now - entry.timestamp > this.MAC_TIMEOUT) {
+                this.macTable.delete(mac);
+            }
         }
+    }
+    
+    override forward(packet: Packet, incomingIface?: NetworkInterface): NetworkInterface[] {
+        this.cleanMAC();
+
+        packet.decrementTTL();
+        if (packet.isExpired()) return [];
+
+        packet.addHop(this);
+
+        // learn source mac
+        if (incomingIface && packet.srcMAC) {
+            this.learnMAC(packet.srcMAC, incomingIface);
+        }
+
+        // known destination?
+        if (packet.dstMAC) {
+            const targetIface = this.lookupMAC(packet.dstMAC);
+            if (targetIface && targetIface.id !== incomingIface?.id) {
+                return [targetIface];
+            }
+        }
+
+        // flood to all ports except incoming
+        return this.interfaces.filter(i => i.id !== incomingIface?.id);
     }
 }

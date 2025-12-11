@@ -1,338 +1,260 @@
-import { StatusCodes } from "http-status-codes";
-
 import { prisma } from "../prisma.js";
 import { AppError } from "../middleware/errorHandler.js";
-import { SimulationBuilder } from "../controllers/SimulationBuilder.js";
-
-import { Packet, Protocol } from "../models/Packet.js";
+import { buildFromDB, type BuildResult } from "../controllers/SimulationBuilder.js";
+import { Protocol } from "../models/Packet.js";
 import { Host } from "../models/Host.js";
-import type { Topology } from "../models/Topology.js";
 import type { Node } from "../models/Node.js";
-import type { NetworkInterface } from "../models/NetworkInterface.js";
+import type { Simulator } from "../models/Simulator.js";
+import { StatusCodes } from "http-status-codes";
 
-type SimulationRuntime = {
-    topology: Topology;
+// active simulation in memory
+type SimRuntime = {
+    simulator: Simulator;
     nodeMap: Map<string, Node>;
-    interfaceMap: Map<string, NetworkInterface>;
-    isRunning: boolean;
-    lastActivity: number;
+    running: boolean;
+    lastUsed: number;
 };
 
+/**
+ * manages simulation lifecycle:
+ * - creating/loading simulations into memory
+ * - sending packets and stepping simulation
+ * - tracking packet states for frontend
+ * - cleanup of idle simulations
+ */
 class SimulationService {
-    private activeSimulations = new Map<string, SimulationRuntime>();
-    private readonly SIMULATION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
-    private readonly CLEANUP_INTERVAL = 5 * 60 * 1000;    // 5 minutes
+    private active = new Map<string, SimRuntime>();
+    private readonly TIMEOUT = 30 * 60 * 1000;  // 30 min
 
     constructor() {
-        // Start cleanup interval
-        setInterval(() => this.cleanupInactiveSimulations(), this.CLEANUP_INTERVAL);
+        // cleanup old sims every 5 min
+        setInterval(() => this.cleanup(), 5 * 60 * 1000);
     }
 
-    /**
-     * Cleanup inactive simulations
-     */
-    private cleanupInactiveSimulations(): void {
+    private cleanup() {
         const now = Date.now();
-        for (const [id, sim] of this.activeSimulations.entries()) {
-            if (!sim.isRunning && (now - sim.lastActivity) > this.SIMULATION_TIMEOUT) {
-                this.activeSimulations.delete(id);
-                console.log(`Cleaned up inactive simulation: ${id}`);
+        for (const [id, sim] of this.active) {
+            if (!sim.running && now - sim.lastUsed > this.TIMEOUT) {
+                this.active.delete(id);
+                console.log(`cleaned up sim ${id}`);
             }
         }
     }
 
-    /**
-     * Update last activity timestamp
-     */
-    private updateTimestamp(simulationId: string): void {
-        const runtime = this.activeSimulations.get(simulationId);
-        if (runtime) runtime.lastActivity = Date.now();
+    private touch(id: string) {
+        const sim = this.active.get(id);
+        if (sim) sim.lastUsed = Date.now();
     }
 
-    /**
-     * Get all simulations for a topology
-     */
-    async getAllSimulations(topologyId: string) {
-        const topology = await prisma.topology.findUnique({ where: { id: topologyId } });
-        if (!topology) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Topology NOT FOUND");
-        }
+    async getAll(topologyId: string) {
+        const topo = await prisma.topology.findUnique({ where: { id: topologyId } });
+        if (!topo) throw new AppError(StatusCodes.NOT_FOUND, "topology not found");
 
-        const simulations = await prisma.simulationSession.findMany({
+        const sims = await prisma.simulationSession.findMany({
             where: { topologyId },
-            orderBy: { createdAt: 'desc' }
+            orderBy: { createdAt: "desc" }
         });
 
-        simulations.forEach(sim => {
-            if (this.activeSimulations.has(sim.id)) this.updateTimestamp(sim.id);
-        });
-
-        return simulations.map(sim => ({
-            ...sim,
-            isActive: this.activeSimulations.has(sim.id),
-            runtimeStatus: this.activeSimulations.get(sim.id)?.isRunning ? 'RUNNING' : 'IDLE'
+        return sims.map(s => ({
+            ...s,
+            isActive: this.active.has(s.id)
         }));
     }
 
-    /**
-     * Create a new simulation
-     */
-    async createSimulation(topologyId: string, name?: string, autoPopulateARP?: boolean, stepDelay?: number) {
-        const topology = await prisma.topology.findUnique({ where: { id: topologyId } });
-        if (!topology) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Topology not found");
-        }
+    async create(topologyId: string, name?: string, autoPopulateARP?: boolean) {
+        const topo = await prisma.topology.findUnique({ where: { id: topologyId } });
+        if (!topo) throw new AppError(StatusCodes.NOT_FOUND, "topology not found");
 
-        const simulation = await prisma.simulationSession.create({
+        // save to db
+        const sim = await prisma.simulationSession.create({
             data: {
-                name: name || `Simulation ${new Date().toISOString()}`,
-                autoPopulateARP: autoPopulateARP ?? false,
-                stepDelay: Number(stepDelay ?? 1000),
+                name: name || `Sim-${Date.now()}`,
+                autoPopulateARP: autoPopulateARP ?? true,
+                stepDelay: 1000,
                 status: "IDLE",
                 topologyId
             }
         });
 
-        const { topology: runtimeTopology, nodeMap, interfaceMap } = 
-            await SimulationBuilder.buildFromDatabase(topologyId, autoPopulateARP ?? false);
+        // build runtime
+        const { simulator, nodeMap } = await buildFromDB(topologyId, autoPopulateARP ?? true);
 
-        this.activeSimulations.set(simulation.id, {
-            topology: runtimeTopology,
+        this.active.set(sim.id, {
+            simulator,
             nodeMap,
-            interfaceMap,
-            isRunning: false,
-            lastActivity: Date.now()
+            running: false,
+            lastUsed: Date.now()
         });
 
         return {
-            simulation,
-            runtimeInfo: {
-                nodesCount: runtimeTopology.nodes.length,
-                linksCount: runtimeTopology.links.length
-            }
+            simulation: sim,
+            info: { nodes: nodeMap.size }
         };
     }
 
-    /**
-     * Get a simulation by ID
-     */
-    async getSimulationById(topologyId: string, simulationId: string) {
-        const simulation = await prisma.simulationSession.findUnique({
-            where: { id: simulationId },
-            include: { topology: { select: { id: true, name: true } } }
-        });
+    async getById(topologyId: string, simId: string) {
+        const sim = await prisma.simulationSession.findUnique({ where: { id: simId } });
+        if (!sim || sim.topologyId !== topologyId) throw new AppError(StatusCodes.NOT_FOUND, "sim not found");
 
-        if (!simulation || simulation.topologyId !== topologyId) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Simulation not found");
-        }
+        this.touch(simId);
 
-        this.updateTimestamp(simulationId);
-
-        const runtime = this.activeSimulations.get(simulationId);
-        const runtimeStatus = runtime ? {
-            isActive: true,
-            isRunning: runtime.isRunning,
-            packetsInFlight: runtime.topology.getPacketsInFlight().length,
-            currentPackets: runtime.topology.getPacketsInFlight().map((pif: any) => ({
-                id: pif.packet.id,
-                currentNode: pif.currentNode.name,
-                srcIp: pif.packet.srcIp,
-                dstIp: pif.packet.dstIp,
-                protocol: pif.packet.protocol,
-                ttl: pif.packet.ttl
-            }))
-        } : { isActive: false };
-
-        return { ...simulation, runtime: runtimeStatus };
-    }
-
-    /**
-     * Load a simulation into memory
-     */
-    async loadSimulation(topologyId: string, simulationId: string, autoPopulateARP: boolean = false) {
-        const simulation = await prisma.simulationSession.findUnique({ where: { id: simulationId } });
-        if (!simulation || simulation.topologyId !== topologyId) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Simulation not found");
-        }
-
-        if (this.activeSimulations.has(simulationId)) {
-            throw new AppError(StatusCodes.CONFLICT, "Already loaded");
-        }
-
-        const { topology: runtimeTopology, nodeMap, interfaceMap } = 
-            await SimulationBuilder.buildFromDatabase(topologyId, autoPopulateARP);
-
-        this.activeSimulations.set(simulationId, {
-            topology: runtimeTopology,
-            nodeMap,
-            interfaceMap,
-            isRunning: false,
-            lastActivity: Date.now()
-        });
-
+        const runtime = this.active.get(simId);
         return {
-            nodesCount: runtimeTopology.nodes.length,
-            linksCount: runtimeTopology.links.length
+            ...sim,
+            isActive: !!runtime,
+            packetsInFlight: runtime?.simulator.getPacketsInFlight().length || 0
         };
     }
 
-    /**
-     * Send a packet in simulation
-     */
-    async sendPacket(simulationId: string, sourceNodeId: string, destinationIp: string, protocol: string, payload?: string) {
-        const runtime = this.activeSimulations.get(simulationId);
-        if (!runtime) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Simulation not loaded");
+    // loads a simulation into memory
+    async load(topologyId: string, simId: string, autoARP = true) {
+        const sim = await prisma.simulationSession.findUnique({ where: { id: simId } });
+        if (!sim || sim.topologyId !== topologyId) throw new AppError(StatusCodes.NOT_FOUND, "sim not found");
+
+        if (this.active.has(simId)) throw new AppError(StatusCodes.CONFLICT, "already loaded");
+
+        const { simulator, nodeMap } = await buildFromDB(topologyId, autoARP);
+
+        this.active.set(simId, {
+            simulator,
+            nodeMap,
+            running: false,
+            lastUsed: Date.now()
+        });
+
+        return { loaded: true, nodes: nodeMap.size };
+    }
+
+    async sendPacket(simId: string, sourceNodeId: string, dstIp: string, protocol: Protocol, payload?: string) {
+        const runtime = this.active.get(simId);
+        if (!runtime) throw new AppError(StatusCodes.NOT_FOUND, "sim not loaded");
+
+        this.touch(simId);
+
+        const source = runtime.nodeMap.get(sourceNodeId);
+        if (!source || !(source instanceof Host)) {
+            throw new AppError(StatusCodes.BAD_REQUEST, "source must be a host");
         }
 
-        this.updateTimestamp(simulationId);
-
-        const sourceNode: Node | undefined = runtime.nodeMap.get(sourceNodeId);
-        if (!sourceNode || !(sourceNode instanceof Host)) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Source node must be a Host");
+        // validate protocol (only ICMP and UDP for user-initiated packets)
+        if (protocol !== Protocol.ICMP && protocol !== Protocol.UDP) {
+            throw new AppError(StatusCodes.BAD_REQUEST, "protocol must be ICMP or UDP");
         }
 
-        const packet: Packet = runtime.topology.sendPacket(
-            sourceNode,
-            destinationIp,
-            protocol as Protocol,
-            payload
-        );
-
-        this.updateTimestamp(simulationId);
+        const pkt = runtime.simulator.sendPacket(source, dstIp, protocol as Protocol, payload);
 
         return {
             packet: {
-                id: packet.id,
-                srcIp: packet.srcIp,
-                dstIp: packet.dstIp,
-                protocol: packet.protocol,
-                ttl: packet.ttl
+                id: pkt.id,
+                srcIp: pkt.srcIp,
+                dstIp: pkt.dstIp,
+                protocol: pkt.protocol,
+                ttl: pkt.ttl,
+                history: pkt.history.map((n: Node) => n.name)
             },
-            packetsInFlight: runtime.topology.getPacketsInFlight().length
+            packetsInFlight: runtime.simulator.getPacketsInFlight().length
         };
     }
 
-    /**
-     * Run a single simulation step
-     */
-    async simulationStep(simulationId: string) {
-        const runtime = this.activeSimulations.get(simulationId);
-        if (!runtime) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Simulation not loaded");
-        }
+    async step(simId: string) {
+        const runtime = this.active.get(simId);
+        if (!runtime) throw new AppError(StatusCodes.NOT_FOUND, "sim not loaded");
 
-        this.updateTimestamp(simulationId);
+        this.touch(simId);
 
-        runtime.topology.step();
-        const packetsInFlight = runtime.topology.getPacketsInFlight();
+        // run a step and get delivery info
+        const stepResult = runtime.simulator.step();
+        const packets = runtime.simulator.getPacketsInFlight();
 
-        this.updateTimestamp(simulationId);
+        // format delivered packets
+        const delivered = stepResult.deliveredThisStep.map(d => ({
+            packetId: d.packet.id,
+            protocol: d.packet.protocol,
+            srcIp: d.packet.srcIp,
+            dstIp: d.packet.dstIp,
+            deliveredTo: d.node.name
+        }));
 
         return {
-            packetsInFlight: packetsInFlight.length,
-            packets: packetsInFlight.map((pif: any) => ({
-                id: pif.packet.id,
-                currentNode: pif.currentNode.name,
-                srcIp: pif.packet.srcIp,
-                dstIp: pif.packet.dstIp,
-                protocol: pif.packet.protocol,
-                ttl: pif.packet.ttl,
-                history: pif.packet.history.map((n: any) => n.name)
+            packetsInFlight: packets.length,
+            delivered,
+            packets: packets.map((p: any) => ({
+                id: p.packet.id,
+                currentNode: p.currentNode.name,
+                srcIp: p.packet.srcIp,
+                dstIp: p.packet.dstIp,
+                protocol: p.packet.protocol,
+                ttl: p.packet.ttl,
+                history: p.packet.history.map((n: any) => n.name)
             }))
         };
     }
+    
+    async run(simId: string, delay?: number, maxSteps?: number) {
+        const runtime = this.active.get(simId);
+        if (!runtime) throw new AppError(StatusCodes.NOT_FOUND, "sim not loaded");
+        if (runtime.running) throw new AppError(StatusCodes.CONFLICT, "already running");
 
-    /**
-     * Run the simulation
-     */
-    async runSimulation(simulationId: string, stepDelay?: number, maxSteps?: number) {
-        const runtime = this.activeSimulations.get(simulationId);
-        if (!runtime) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Simulation not loaded");
-        }
+        const stepDelay = delay ?? 100;
+        const max = maxSteps ?? 100;
 
-        if (runtime.isRunning) {
-            throw new AppError(StatusCodes.CONFLICT, "Already running");
-        }
-
-        const finalStepDelay = stepDelay ?? 100;
-        const finalMaxSteps = maxSteps ?? 100;
-
-        runtime.isRunning = true;
-        this.updateTimestamp(simulationId);
-        await prisma.simulationSession.update({ where: { id: simulationId }, data: { status: "RUNNING" } });
+        runtime.running = true;
+        this.touch(simId);
+        await prisma.simulationSession.update({ where: { id: simId }, data: { status: "RUNNING" } });
 
         let steps = 0;
-        const startTime = Date.now();
+        const start = Date.now();
 
         try {
-            while (runtime.topology.getPacketsInFlight().length > 0 && steps < finalMaxSteps && runtime.isRunning) {
-                runtime.topology.step();
+            while (runtime.simulator.getPacketsInFlight().length > 0 && steps < max && runtime.running) {
+                runtime.simulator.step();
                 steps++;
-                this.updateTimestamp(simulationId);
-                await new Promise(resolve => setTimeout(resolve, finalStepDelay));
+                this.touch(simId);
+                await new Promise(r => setTimeout(r, stepDelay));
             }
 
-            await prisma.simulationSession.update({ where: { id: simulationId }, data: { status: "COMPLETED" } });
-            this.updateTimestamp(simulationId);
+            await prisma.simulationSession.update({ where: { id: simId }, data: { status: "COMPLETED" } });
 
             return {
                 steps,
-                duration: Date.now() - startTime,
-                packetsRemaining: runtime.topology.getPacketsInFlight().length
+                duration: Date.now() - start,
+                remaining: runtime.simulator.getPacketsInFlight().length
             };
         } finally {
-            runtime.isRunning = false;
-            this.updateTimestamp(simulationId);
+            runtime.running = false;
         }
     }
+    
+    async stop(simId: string) {
+        const runtime = this.active.get(simId);
+        if (!runtime) throw new AppError(StatusCodes.NOT_FOUND, "sim not loaded");
 
-    /**
-     * Stop a running simulation
-     */
-    async stopSimulation(simulationId: string) {
-        const runtime = this.activeSimulations.get(simulationId);
-        if (!runtime) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Simulation not loaded");
-        }
-
-        runtime.isRunning = false;
-        this.updateTimestamp(simulationId);
-        await prisma.simulationSession.update({ where: { id: simulationId }, data: { status: "IDLE" } });
+        runtime.running = false;
+        await prisma.simulationSession.update({ where: { id: simId }, data: { status: "IDLE" } });
     }
 
-    /**
-     * Unload simulation from memory
-     */
-    async unloadSimulation(simulationId: string) {
-        const runtime = this.activeSimulations.get(simulationId);
-        if (!runtime) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Simulation not loaded");
-        }
+    // deletes from memory
+    async unload(simId: string) {
+        const runtime = this.active.get(simId);
+        if (!runtime) throw new AppError(StatusCodes.NOT_FOUND, "sim not loaded");
 
-        runtime.isRunning = false;
-        this.activeSimulations.delete(simulationId);
+        runtime.running = false;
+        this.active.delete(simId);
     }
 
-    /**
-     * Delete a simulation
-     */
-    async deleteSimulation(topologyId: string, simulationId: string) {
-        const simulation = await prisma.simulationSession.findUnique({ where: { id: simulationId } });
-        if (!simulation || simulation.topologyId !== topologyId) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Simulation not found");
-        }
+    async delete(topologyId: string, simId: string) {
+        const sim = await prisma.simulationSession.findUnique({ where: { id: simId } });
+        if (!sim || sim.topologyId !== topologyId) throw new AppError(StatusCodes.NOT_FOUND, "sim not found");
 
-        const runtime = this.activeSimulations.get(simulationId);
+        // clean up runtime
+        const runtime = this.active.get(simId);
         if (runtime) {
-            runtime.isRunning = false;
-            this.activeSimulations.delete(simulationId);
+            runtime.running = false;
+            this.active.delete(simId);
         }
 
-        await prisma.simulationSession.delete({ where: { id: simulationId } });
-
-        return { id: simulation.id, name: simulation.name };
+        await prisma.simulationSession.delete({ where: { id: simId } });
+        return { id: sim.id, name: sim.name };
     }
 }
 

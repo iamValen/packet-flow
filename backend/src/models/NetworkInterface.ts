@@ -1,7 +1,8 @@
 import type { Node } from "./Node.js";
 
 /**
- * Represents a NIC for devices (router, host, switch)
+ * network interface card (NIC) for nodes
+ * handles IP/MAC addressing and subnet calculations
  */
 export class NetworkInterface {
     readonly id: string;
@@ -11,215 +12,120 @@ export class NetworkInterface {
     private readonly _mac: string;
     parentNode?: Node;
 
-    /**
-     * Create a Network Interface
-     * @param ip IPv4 Address, for example: "192.168.1.100"
-     * @param mask IPv4 format Address of the mask, for example: "255.255.255.0", "255.255.0.0"...
-     * @param mac Mac of the Network Interface
-     */
     constructor(ip: string, mask: string, mac?: string) {
         this.id = crypto.randomUUID();
-        if (!NetworkInterface.isValidIP(ip)) throw new Error(`Invalid IP: ${ip}`);
-        if (!NetworkInterface.isValidSubnetMask(mask)) throw new Error(`Invalid subnet mask: ${mask}`);
-        
+
+        if (!NetworkInterface.isValidIP(ip)) throw new Error(`bad ip: ${ip}`);
+        if (!NetworkInterface.isValidSubnetMask(mask)) throw new Error(`bad mask: ${mask}`);
+
         this._ip = ip;
         this._mask = mask;
         this._cidr = NetworkInterface.maskToCidr(mask);
 
-        if (mac && !NetworkInterface.isValidMAC(mac))
-            throw new Error(`Invalid MAC address ${mac}`);
-
+        // generate mac if not provided
+        if (mac && !NetworkInterface.isValidMAC(mac)) throw new Error(`bad mac: ${mac}`);
         this._mac = mac || NetworkInterface.generateMAC();
     }
 
-    // Getters
     get ip(): string { return this._ip; }
     get mask(): string { return this._mask; }
     get cidr(): number { return this._cidr; }
     get mac(): string { return this._mac; }
 
-    
-    /**
-     * Generates a valid Mac address 
-     * It chooses 2 random hexadecimal digits from the "hexDigits" string and repeats it twice
-     * @returns Mac address
-    */
-    static generateMAC(): string {
-        const hexDigits = "0123456789ABCDEF";
-
-        let mac = "";
-        for (let i = 0; i < 6; i++) {
-           if (i > 0) mac += ":";
-           mac += hexDigits[Math.floor(Math.random() * 16)];
-           mac += hexDigits[Math.floor(Math.random() * 16)];
-        }
-
-        return mac;
-    }
-    
-    /**
-     * Creates a NetworkInterface object from CIDR notation
-     * @param cidrNotation - CIDR notation like: "192.168.1.10/24"
-     * @returns NetworkInterface created
-    */
-    static fromCIDR(cidrNotation: string, mac?: string): NetworkInterface {
-        const [ip, prefix] = cidrNotation.split("/");
-        if(ip == undefined || prefix == undefined) 
-            throw new Error(`Invalid CIDR notation IP: ${cidrNotation}`);
-        const cidr = parseInt(prefix, 10);
-        const mask = this.cidrToMask(cidr);
-        
-        return new NetworkInterface(ip, mask, mac);
-    }
-
-    /**
-     * Set a node as the parent of this Network Interface
-     * @param node - Node that will be set as parent
-     */
     setParentNode(node: Node): void {
         this.parentNode = node;
     }
- 
-    /**
-     * Check if certain string input is a valid IPv4 adrress, needs to be 4 octets of 3 numbers from 0 to 255
-     * @param ip - e.g. "192.168.1.1", "255.255.255.255", "0.0.0.0"
-     * @returns true if valid, false if not
-     */
-    static isValidIP(ip: string): boolean {
-        const parts: string[] = ip.split(".");
 
-        if(parts.length !== 4) 
-            return false;
-        
-        return parts.every((part: string): boolean => {
-            const num: number = parseInt(part.trim(), 10);
-            return !isNaN(num) && num >= 0 && num <= 255;
+    // random mac address generator
+    static generateMAC(): string {
+        const hex = "0123456789ABCDEF";
+        let mac = "";
+        for (let i = 0; i < 6; i++) {
+            if (i > 0) mac += ":";
+            mac += hex[Math.floor(Math.random() * 16)];
+            mac += hex[Math.floor(Math.random() * 16)];
+        }
+        return mac;
+    }
+
+    // create from "192.168.1.10/24" format
+    static fromCIDR(notation: string, mac?: string): NetworkInterface {
+        const [ip, prefix] = notation.split("/");
+        if (!ip || !prefix) throw new Error(`bad cidr: ${notation}`);
+        const mask = this.cidrToMask(parseInt(prefix, 10));
+        return new NetworkInterface(ip, mask, mac);
+    }
+
+    // check if string is valid ipv4
+    static isValidIP(ip: string): boolean {
+        const parts = ip.split(".");
+        if (parts.length !== 4) return false;
+        return parts.every(p => {
+            const n = parseInt(p.trim(), 10);
+            return !isNaN(n) && n >= 0 && n <= 255;
         });
     }
 
-    /**
-     * Validate subnet mask: must be valid IPv4 address and contiguous 1s followed by 0s
-     * @param mask - e.g. "255.255.255.0"
-     * @returns true if valid, false if not
-     */
+    // check if mask is valid (contiguous 1s then 0s)
     static isValidSubnetMask(mask: string): boolean {
-        if(!this.isValidIP(mask)) 
-            return false;
-        
-        const parts: string[] = mask.split(".");
-        const binaryParts: string[] = parts.map((part : String): string => {
-            const num: number = Number(part);
-            const bin: string = num.toString(2).padStart(8,"0");
-            return bin;
-        });
-
-        const binary: string = binaryParts.join("");
-        let foundZero: boolean = false;
-        for (const bit of binary){
-            if(bit === "0") foundZero = true;
-            else if(foundZero && bit === "1") 
-                return false;
+        if (!this.isValidIP(mask)) return false;
+        const binary = mask.split(".")
+            .map(p => Number(p).toString(2).padStart(8, "0"))
+            .join("");
+        // should be all 1s followed by all 0s
+        let foundZero = false;
+        for (const bit of binary) {
+            if (bit === "0") foundZero = true;
+            else if (foundZero) return false;
         }
-
         return true;
     }
 
-    /**
-     * Validate MAC Address
-     * @param mac 
-     * @returns 
-     */
     static isValidMAC(mac: string): boolean {
         return /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test(mac);
     }
 
-    /**
-     * Calculates the network address of the Network Interface
-     * Takes the IPv4 address and the SubnetMask and makes the bitwise operation AND ("&")
-     * @returns the network address for this interface
-     */
+    // get network address (ip AND mask)
     getNetworkAddress(): string {
-        const ipParts: number[] = this._ip.split(".").map((n: string): number => parseInt(n, 10));
-        const maskParts: number[] = this._mask.split(".").map((n: string): number => parseInt(n, 10));
-        const network: number[] = ipParts.map((part: number, i: number) => part & (maskParts[i] ?? 0)); // bitwise AND
-        return network.join(".");
+        const ipParts = this._ip.split(".").map(Number);
+        const maskParts = this._mask.split(".").map(Number);
+        return ipParts.map((p, i) => p & (maskParts[i] ?? 0)).join(".");
     }
 
-    /**
-     * Calculates the broadcast address of the Network Interface
-     * Takes the IPv4 address and the SubnetMask with inverted bits and makes the bitwise operation OR ("|")
-     * @returns the broadcast address for the interface
-     */
+    // get broadcast address (ip OR inverted mask)
     getBroadcastAddress(): string {
-        const ipParts: number[] = this._ip.split(".").map((n: string): number => parseInt(n, 10));
-        const maskParts: number[] = this._mask.split(".").map((n: string): number => parseInt(n, 10));
-        
-        const broadcastParts: number[] = ipParts.map((ip: number, i: number): number => 
-            ip | (~(maskParts[i] ?? 0) & 255)
-        ); // flip bits, limit to 8 
-        const broadcast: string = broadcastParts.join(".");
-        return broadcast;
+        const ipParts = this._ip.split(".").map(Number);
+        const maskParts = this._mask.split(".").map(Number);
+        return ipParts.map((p, i) => p | (~(maskParts[i] ?? 0) & 255)).join(".");
     }
 
-    /**
-     * Calculates the number of hosts that the Network (not including network and broadcast addresses)
-     * @returns number of possible hosts (except network and broadcast)
-     */
-    getUsableHostCount(): number {
-        return Math.pow(2, (32 - this._cidr)) - 2;
-    }
-
+    // check if given ip is in same subnet
     isInSubnet(ip: string): boolean {
-        if(!NetworkInterface.isValidIP(ip))
-            throw new Error(`Invalid IP: ${ip}`);
-        const ipParts: number[] = ip.split(".").map((n: string): number => parseInt(n, 10));
-        const networkParts: number[] = this.getNetworkAddress().split(".").map((n: string): number => parseInt(n, 10));
-        const maskParts: number[] = this._mask.split(".").map((n: string): number => parseInt(n, 10));
-        
+        if (!NetworkInterface.isValidIP(ip)) throw new Error(`bad ip: ${ip}`);
+        const ipParts = ip.split(".").map(Number);
+        const netParts = this.getNetworkAddress().split(".").map(Number);
+        const maskParts = this._mask.split(".").map(Number);
         for (let i = 0; i < 4; i++) {
-            if (((ipParts[i] ?? 0) & (maskParts[i] ?? 0)) !== networkParts[i])
-                return false;
+            if (((ipParts[i] ?? 0) & (maskParts[i] ?? 0)) !== netParts[i]) return false;
         }
         return true;
     }
 
-    /**
-     * Convert mask IP notation to CIDR
-     * Take something for example "255.255.255.0" to "24"
-     * @param mask - ipv4 notation of mask
-     * @returns Convert subnet mask to CIDR prefix length
-     */
+    // convert mask to cidr (255.255.255.0 -> 24)
     static maskToCidr(mask: string): number {
-        if(!NetworkInterface.isValidSubnetMask(mask))
-            throw new Error(`Invalid mask: ${mask}`);
-        const maskParts = mask.split(".").map(Number);
-        const binaryMask: string = maskParts.map(part => part.toString(2).padStart(8, "0")).join("");
-
-        let count: number = 0;
-        for (const bit of binaryMask)
-            if (bit === "1") count++;
-
-        return count;
+        if (!this.isValidSubnetMask(mask)) throw new Error(`bad mask: ${mask}`);
+        const binary = mask.split(".").map(p => Number(p).toString(2).padStart(8, "0")).join("");
+        return binary.split("1").length - 1;
     }
 
-    /**
-     * Convert CIDR to mask IP notation
-     * Take something for example "24" and convert to "255.255.255.0"
-     * @param cidr - integer (0–32)
-     * @returns subnet mask in dotted decimal notation
-     */
+    // convert cidr to mask (24 -> 255.255.255.0)
     static cidrToMask(cidr: number): string {
-        if (cidr < 0 || cidr > 32 || !Number.isInteger(cidr)) throw new Error(`Invalid CIDR: ${cidr}`);
-        const binaryMask: string = "1".repeat(cidr) + "0".repeat(32 - cidr);
-        const octets: string[] = [];
-
-        for (let i: number = 0; i < 32; i += 8) {
-            const byteString: string = binaryMask.slice(i, i + 8);
-            const octetValue: number = parseInt(byteString, 2);
-            octets.push(octetValue.toString());
+        if (cidr < 0 || cidr > 32) throw new Error(`bad cidr: ${cidr}`);
+        const binary = "1".repeat(cidr) + "0".repeat(32 - cidr);
+        const octets = [];
+        for (let i = 0; i < 32; i += 8) {
+            octets.push(parseInt(binary.slice(i, i + 8), 2).toString());
         }
-
-        const mask: string = octets.join(".");
-        return mask;
+        return octets.join(".");
     }
 }

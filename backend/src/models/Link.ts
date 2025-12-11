@@ -1,47 +1,29 @@
 import { NetworkInterface } from "./NetworkInterface.js";
 
 /**
- * Represents a connection between two network interfaces
+ * connection between two interfaces
+ * like a cable between two NICs
  */
 export class Link {
     readonly id: string;
-    readonly interfaceA: NetworkInterface;
-    readonly interfaceB: NetworkInterface;
+    readonly ifaceA: NetworkInterface;
+    readonly ifaceB: NetworkInterface;
 
-    constructor(interfaceA: NetworkInterface, interfaceB: NetworkInterface) {
+    constructor(ifaceA: NetworkInterface, ifaceB: NetworkInterface) {
         this.id = crypto.randomUUID();
-        this.interfaceA = interfaceA;
-        this.interfaceB = interfaceB;
+        this.ifaceA = ifaceA;
+        this.ifaceB = ifaceB;
     }
 
-    /**
-     * Check if a given Interface makes part of the connection
-     * @param intf - Interface to check
-     * @returns true if intf makes part of the connection, flase if not
-     */
-    involvesInterface(intf: NetworkInterface): boolean {
-        return this.interfaceA.id === intf.id || this.interfaceB.id === intf.id;
+    // check if link has this interface
+    hasInterface(iface: NetworkInterface): boolean {
+        return this.ifaceA.id === iface.id || this.ifaceB.id === iface.id;
     }
 
-    /**
-     * Given a Network Interface that makes part of the connection it returns the interface on the other end of the link
-     * @param intf 
-     * @returns interfaceB if intf = interfaceA, interfaceA if intf = interfaceB, null if intf is neither
-     */
-    getOtherEnd(intf: NetworkInterface): NetworkInterface | null {
-        if (intf.id === this.interfaceA.id) return this.interfaceB;
-        if (intf.id === this.interfaceB.id) return this.interfaceA;
+    // given one interface, get the other end of the link
+    getOtherEnd(iface: NetworkInterface): NetworkInterface | null {
+        if (iface.id === this.ifaceA.id) return this.ifaceB;
+        if (iface.id === this.ifaceB.id) return this.ifaceA;
         return null;
-    }
-
-    /**
-     * Serialize to JSON
-     */
-    toJSON() {
-        return {
-            id: this.id,
-            interfaceA: this.interfaceA.id,
-            interfaceB: this.interfaceB.id
-        };
     }
 }

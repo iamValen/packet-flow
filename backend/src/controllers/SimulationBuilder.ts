@@ -4,140 +4,98 @@ import { Host } from "../models/Host.js";
 import { Router } from "../models/Router.js";
 import { Switch } from "../models/Switch.js";
 import { NetworkInterface } from "../models/NetworkInterface.js";
-import { Protocol } from "../models/Packet.js";
+import { Simulator } from "../models/Simulator.js";
 import type { Node } from "../models/Node.js";
+import { NodeType } from "../models/Node.js";
 
 const prisma = new PrismaClient();
 
-export type SimulationBuildResult = {
+export type BuildResult = {
     topology: Topology;
+    simulator: Simulator;
     nodeMap: Map<string, Node>;
-    interfaceMap: Map<string, NetworkInterface>;
+    ifaceMap: Map<string, NetworkInterface>;
 };
 
-export class SimulationBuilder {
-    /**
-     * Build a simulation topology from database
-     * 
-     * @param topologyId - Database topology ID
-     * @param autoPopulateARP - Pre-fill ARP caches for simplified simulation
-     * @param autoConfigureRoutes - Auto-configure routes on all routers (recommended)
-     */
-    static async buildFromDatabase(
-        topologyId: string,
-        autoPopulateARP: boolean = false,
-        autoConfigureRoutes: boolean = true  // NEW: default to true
-    ): Promise<SimulationBuildResult> {
-        const dbTopology = await prisma.topology.findUnique({
-            where: { id: topologyId },
-            include: {
-                nodes: {
-                    include: {
-                        interfaces: true,
-                        firewallRules: { orderBy: { priority: 'asc' } },
-                        routingEntries: { include: { nextHopInterface: true } }
-                    }
-                },
-                links: { include: { interfaceA: true, interfaceB: true } }
-            }
-        });
-
-        if (!dbTopology) {
-            throw new Error(`Topology with ID ${topologyId} not found`);
-        }
-
-        const topology: Topology = new Topology(dbTopology.name);
-        const nodeMap = new Map<string, Node>();
-        const interfaceMap = new Map<string, NetworkInterface>();
-
-        // Create nodes and interfaces
-        for (const dbNode of dbTopology.nodes) {
-            const interfaces: NetworkInterface[] = [];
-
-            for (const dbInterface of dbNode.interfaces) {
-                const ni = new NetworkInterface(
-                    dbInterface.ip,
-                    dbInterface.mask,
-                    dbInterface.mac
-                );
-                interfaces.push(ni);
-                interfaceMap.set(dbInterface.id, ni);
-            }
-
-            let node: Node;
-            const position: { x: number; y: number } = { x: dbNode.positionX, y: dbNode.positionY };
-
-            switch (dbNode.type) {
-                case "HOST":
-                    node = new Host(dbNode.name, position, interfaces);
-                    if (dbNode.defaultGateway) {
-                        (node as Host).setDefaultGateway(dbNode.defaultGateway);
-                    }
-                    break;
-                case "ROUTER":
-                    node = new Router(dbNode.name, position, interfaces);
-                    break;
-                case "SWITCH":
-                    node = new Switch(dbNode.name, position, interfaces);
-                    break;
-                default:
-                    throw new Error(`Unknown node type: ${dbNode.type}`);
-            }
-
-            topology.addNode(node);
-            nodeMap.set(dbNode.id, node);
-
-            // Load manually configured routes and firewall rules for routers
-            // (These will be used if autoConfigureRoutes is false)
-            if (node instanceof Router && !autoConfigureRoutes) {
-                for (const route of dbNode.routingEntries) {
-                    const nextHopInterface = interfaceMap.get(route.nextHopInterfaceId);
-                    if (nextHopInterface) {
-                        try {
-                            node.addRoute(route.destination, route.mask, nextHopInterface);
-                        } catch (e) {
-                            // Route might already exist
-                        }
-                    }
+/**
+ * builds a topology from the database for simulation
+ */
+export async function buildFromDB( topologyId: string, autoFillARP: boolean = false): Promise<BuildResult> {
+    // grab everything from db
+    const dbTopo = await prisma.topology.findUnique({
+        where: { id: topologyId },
+        include: {
+            nodes: {
+                include: {
+                    interfaces: true,
+                    routingEntries: { include: { nextHopInterface: true } }
                 }
-            }
+            },
+            links: { include: { interfaceA: true, interfaceB: true } }
+        }
+    });
 
-            // Always load firewall rules
-            if (node instanceof Router) {
-                for (const rule of dbNode.firewallRules) {
-                    node.addRule(
-                        rule.srcIp,
-                        rule.dstIp,
-                        rule.protocol as Protocol | null,
-                        rule.action as "ALLOW" | "DROP",
-                        rule.priority
-                    );
+    if (!dbTopo) throw new Error(`topology ${topologyId} not found`);
+
+    const topology = new Topology(dbTopo.name);
+    const nodeMap = new Map<string, Node>();
+    const ifaceMap = new Map<string, NetworkInterface>();
+
+    // create nodes
+    for (const dbNode of dbTopo.nodes) {
+        const ifaces: NetworkInterface[] = [];
+
+        for (const dbIface of dbNode.interfaces) {
+            const ni = new NetworkInterface(dbIface.ip, dbIface.mask, dbIface.mac);
+            ifaces.push(ni);
+            ifaceMap.set(dbIface.id, ni);
+        }
+
+        let node: Node;
+        const pos = { x: dbNode.positionX, y: dbNode.positionY };
+
+        switch (dbNode.type) {
+            case NodeType.HOST:
+                node = new Host(dbNode.name, pos, ifaces);
+                if (dbNode.defaultGateway) {
+                    (node as Host).setDefaultGateway(dbNode.defaultGateway);
                 }
-            }
+                break;
+            case NodeType.ROUTER:
+                node = new Router(dbNode.name, pos, ifaces);
+                break;
+            case NodeType.SWITCH:
+                node = new Switch(dbNode.name, pos, ifaces);
+                break;
+            default:
+                throw new Error(`unknown type: ${dbNode.type}`);
         }
 
-        // Create all links
-        for (const dbLink of dbTopology.links) {
-            const interfaceA: NetworkInterface | undefined = interfaceMap.get(dbLink.interfaceAId);
-            const interfaceB: NetworkInterface | undefined = interfaceMap.get(dbLink.interfaceBId);
-
-            if (interfaceA && interfaceB) {
-                topology.addLink(interfaceA, interfaceB);
-            }
-        }
-
-        // Auto-configure routes for all routers (like a real network with dynamic routing)
-        if (autoConfigureRoutes) {
-            console.log("=== Auto-configuring routes for all routers ===");
-            topology.autoConfigureAllRoutes();
-        }
-
-        // Pre-fill ARP caches if requested
-        if (autoPopulateARP) {
-            console.log("=== Pre-populating ARP caches ===");
-            topology.fillARP();
-        }
-
-        return { topology, nodeMap, interfaceMap };
+        topology.addNode(node);
+        nodeMap.set(dbNode.id, node);
     }
+
+    // create links
+    for (const dbLink of dbTopo.links) {
+        const ifaceA = ifaceMap.get(dbLink.interfaceAId);
+        const ifaceB = ifaceMap.get(dbLink.interfaceBId);
+        if (ifaceA && ifaceB) {
+            topology.addLink(ifaceA, ifaceB);
+        }
+    }
+
+    // auto configure routes
+    console.log("=== configuring routes ===");
+    topology.autoConfigureRoutes();
+
+    // create simulator
+    const simulator = new Simulator(topology);
+
+    // fill arp if requested
+    if (autoFillARP) {
+        console.log("=== filling arp caches ===");
+        simulator.fillARP();
+    }
+
+    return { topology, simulator, nodeMap, ifaceMap };
 }

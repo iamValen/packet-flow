@@ -1,34 +1,34 @@
 import { NetworkInterface } from "./NetworkInterface.js";
-import { Node } from "./Node.js"
+import type { Node } from "./Node.js";
 
 export const Protocol = {
     ICMP: "ICMP",
     UDP: "UDP",
-    TCP: "TCP",
     ARP: "ARP"
-} as const
-// use that enum as a type
-export type Protocol = (typeof Protocol) [keyof typeof Protocol] 
+    // TCP: "TCP"
+} as const;
 
+export type Protocol = (typeof Protocol)[keyof typeof Protocol];
 
-// ARP protocol specific Type and Payload
-export const ARPpayloadType = {
+// ARP stuff
+export const ARPType = {
     REQUEST: "REQUEST",
     REPLY: "REPLY"
-} as const
-export type ARPpayloadType = (typeof ARPpayloadType) [keyof typeof ARPpayloadType]
+} as const;
 
-export type ARPpayload = {
-    action: ARPpayloadType,
-    senderIP: string,
-    senderMAC: string,
-    targetIP: string,
-    targetMAC?: string,
-}
+export type ARPType = (typeof ARPType)[keyof typeof ARPType];
+
+export interface ARPData {
+    type: ARPType;
+    senderIP: string;
+    senderMAC: string;
+    targetIP: string;
+    targetMAC?: string;
+};
 
 /**
- * Represents a Network Packet - the basic data unit traveling between nodes
- * It carries addressing (IP/MAC), protocol, and optional payload data
+ * a packet that moves through the network
+ * keeps track of where its been (history) for visualization
  */
 export class Packet {
     readonly id: string;
@@ -39,42 +39,27 @@ export class Packet {
     protocol: Protocol;
     payload?: string;
     ttl: number;
-    history: Node[] = [];
-    readonly timestamp: number;
-    
-    /**
-     * Create a Network Packet
-     * @param srcIp - Source IP address (IPv4) of the sender
-     * @param dstIp - Destination IP address (IPv4)
-     * @param protocol - Transport/network protocol: ICMP, TCP, UDP
-     * @param payload - Optional packet data (e.g., "ICMP Echo Request")
-     * @param srcMAC - Optional source MAC address (for Layer 2)
-     * @param dstMAC - OPtional destination Mac address (L2)
-     */
-    constructor(srcIp: string, dstIp: string, protocol: Protocol = Protocol.ICMP, payload?: string, srcMAC?: string, dstMAC?: string) {
-        if (!NetworkInterface.isValidIP(srcIp))
-            throw new Error(`Invalid source IP address: ${srcIp}`);
-        if (!NetworkInterface.isValidIP(dstIp))
-            throw new Error(`Invalid destination IP address: ${dstIp}`);
-        
+    history: Node[] = [];  // nodes this packet visited
+    readonly created: number;
+
+    constructor( srcIp: string, dstIp: string, protocol: Protocol = Protocol.ICMP, payload?: string, srcMAC?: string, dstMAC?: string) {
+        if (!NetworkInterface.isValidIP(srcIp)) throw new Error(`bad src ip: ${srcIp}`);
+        if (!NetworkInterface.isValidIP(dstIp)) throw new Error(`bad dst ip: ${dstIp}`);
+
         this.id = crypto.randomUUID();
         this.srcIp = srcIp;
         this.dstIp = dstIp;
-        this.srcMAC = srcMAC || 'FF:FF:FF:FF:FF:FF';
-        if(dstMAC != undefined) this.dstMAC = dstMAC;
+        this.srcMAC = srcMAC || "FF:FF:FF:FF:FF:FF";
+        if(dstMAC) this.dstMAC = dstMAC;
         this.protocol = protocol;
-        if(payload != undefined) this.payload = payload;
-        this.ttl = 64;
-        this.timestamp = Date.now();
+        if(payload) this.payload = payload;
+        this.ttl = 64;  // standard ttl
+        this.created = Date.now();
     }
 
-    /**
-     * Create a deep clone of this packet for broadcast/multicast scenarios
-     * Each clone gets a new ID but maintains the same payload and addressing
-     * @returns A new Packet instance with copied properties
-     */
+    // make a copy for broadcast scenarios
     clone(): Packet {
-        const clonedPacket = new Packet(
+        const copy = new Packet(
             this.srcIp,
             this.dstIp,
             this.protocol,
@@ -82,43 +67,26 @@ export class Packet {
             this.srcMAC,
             this.dstMAC
         );
-        clonedPacket.ttl = this.ttl;
-        // copy history (clone array to avoid shared reference)
-        clonedPacket.history = [...this.history];
-        
-        return clonedPacket;
+        copy.ttl = this.ttl;
+        copy.history = [...this.history];
+        return copy;
     }
 
-    /**
-     * Decrease the packet’s Time To Live by one - called on every hop
-     * If TTL reaches 0, the packet is considered expired and must be dropped
-     */
+    // called at each hop
     decrementTTL(): void {
         this.ttl--;
     }
 
-    /**
-     * Check if the packet’s TTL has reached zero or below
-     * @returns true if the packet should be discarded due to TTL expiration
-     */
     isExpired(): boolean {
         return this.ttl <= 0;
     }
 
-    /**
-     * Append the node to the history to visualize each hop through each node
-     * @param nodeID current node where the packet is
-     */
-    logHop(node: Node): void {
+    // track where packet has been
+    addHop(node: Node): void {
         this.history.push(node);
     }
 
-    /**
-     * Set or update the destination MAC address for this packet
-     * Useful for switches or ARP-like mechanisms when resolving Layer 2 destinations
-     * @param mac Destination MAC address
-     */
-    setDestinationMAC(mac: string): void {
+    setDstMAC(mac: string): void {
         this.dstMAC = mac;
     }
 }

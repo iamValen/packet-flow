@@ -1,471 +1,246 @@
 import { Node, NodeType } from "./Node.js";
 import { NetworkInterface } from "./NetworkInterface.js";
-import { Packet, Protocol, type ARPpayload, ARPpayloadType } from "./Packet.js";
-import type { ARPEntry } from "./Host.js";
+import { Packet, Protocol, ARPType, type ARPData } from "./Packet.js";
 
-/**
- * Firewall action type
- * ALLOW = accept packet
- * DROP = block packet
- */
-const FirewallAction = {
-    ALLOW: "ALLOW",
-    DROP: "DROP",
-} as const;
-type FirewallAction = (typeof FirewallAction)[keyof typeof FirewallAction];
+type ARPEntry = { mac: string; timestamp: number; };
 
-/**
- * Represents a firewall rule entry
- */
-export interface FirewallRule {
-    id: string;
-    srcIp: string;
-    dstIp: string;
-    protocol: Protocol | null; 
-    action: FirewallAction; // Action to take (ALLOW or DROP)
-    priority: number; // Lower number = higher priority
+// routing table entry
+export type Route = {
+    destination: string;
+    mask: string;
+    cidr: number;
+    outInterface: NetworkInterface;
+    isDefault: boolean;
 };
 
 /**
- * Represents a routing table entry
- */
-export interface RouteEntry {
-    destination: string;                // Destination network (ex. 192.168.0.0)
-    mask: string;                       
-    cidr: number;                       // CIDR equivalent
-    nextHopInterface: NetworkInterface; // Outgoing interface for the route
-    isDefault: boolean;                 // True if this is default route (0.0.0.0/0)
-};
-
-/**
- * Router node can forward packets, manage ARP cache, and apply firewall rules
+ * forwards packets between networks
+ * has routing table and arp cache
  */
 export class Router extends Node {
     readonly type: NodeType = NodeType.ROUTER;
-    routingTable: RouteEntry[];
-    private _arpCache: Map<string, ARPEntry>;    // ARP cache: IP => MAC
-    private readonly ARP_CACHE_TIMEOUT = 300_000; // ARP cache expiration in ms (5 min)
-    private _rules: FirewallRule[] = [];         // List of firewall rules
-    private _defaultPolicy: FirewallAction = FirewallAction.ALLOW; // Default firewall policy
+    routes: Route[] = [];
+    private arpCache: Map<string, ARPEntry> = new Map();
+    private readonly ARP_TIMEOUT = 3600000;  // 1 hour
 
-    /**
-     * Create a new Router instance
-     * @param name - Router name
-     * @param position - Visualization coordinates (x, y)
-     * @param interfaces - Optional pre-attached network interfaces
-     */
-    constructor(
-        name: string,
-        position: { x: number; y: number },
-        interfaces: NetworkInterface[] = []
-    ) {
+    constructor(name: string, position: { x: number; y: number }, interfaces: NetworkInterface[] = []) {
         super(name, position, interfaces);
-        this.routingTable = [];
-        this._arpCache = new Map();
     }
 
-    /**
-     * Determines whether this router can forward packets
-     * @returns Always true for routers
-     */
-    override canForwardPacket(): boolean {
-        return true;
+    override canForward(): boolean { return true; }
+    override getInterfaces(): NetworkInterface[] { return this.interfaces; }
+
+    // arp methods
+    addARP(ip: string, mac: string): void {
+        this.arpCache.set(ip, { mac, timestamp: Date.now() });
     }
 
-    /**
-     * Get all interfaces attached to this router
-     * @returns Array of NetworkInterface objects
-     */
-    override getInterfaces(): NetworkInterface[] {
-        return this.interfaces;
-    }
-
-    // ARP Methods
-
-    /**
-     * Add an ARP cache entry mapping IP => MAC
-     * @param ip - IPv4 address
-     * @param mac - MAC address
-     */
-    addARPEntry(ip: string, mac: string): void {
-        this._arpCache.set(ip, { mac, timestamp: Date.now() });
-    }
-
-    /**
-     * Look up a MAC address in the ARP cache
-     * @param ip - Destination IPv4 address
-     * @returns MAC address if found and valid; null if missing or expired
-     */
-    private lookupARP(ip: string): string | null {
-        const entry = this._arpCache.get(ip);
+    lookupARP(ip: string): string | null {
+        const entry = this.arpCache.get(ip);
         if (!entry) return null;
-
-        if (Date.now() - entry.timestamp > this.ARP_CACHE_TIMEOUT) {
-            this._arpCache.delete(ip);
+        if (Date.now() - entry.timestamp > this.ARP_TIMEOUT) {
+            this.arpCache.delete(ip);
             return null;
         }
         return entry.mac;
     }
 
-    /**
-     * Return a copy of the current ARP cache
-     * @returns Map of IP => ARPEntry
-     */
     getARPCache(): Map<string, ARPEntry> {
-        return new Map(this._arpCache);
+        return new Map(this.arpCache);
     }
 
-    /**
-     * Remove expired entries from ARP cache
-     */
-    private cleanARPCache(): void {
-        const now = Date.now();
-        for (const [ip, entry] of this._arpCache.entries()) {
-            if (now - entry.timestamp > this.ARP_CACHE_TIMEOUT)
-                this._arpCache.delete(ip);
-        }
-    }
-
-    /**
-     * Create an ARP request packet for a target IP
-     * @param targetIP - Destination IP to query
-     * @param ni - Interface used to send the ARP request
-     * @returns Packet representing the ARP request
-     */
-    sendARPrequest(targetIP: string, ni: NetworkInterface): Packet {
-        const payload: ARPpayload = {
-            action: ARPpayloadType.REQUEST,
-            senderIP: ni.ip,
-            senderMAC: ni.mac,
-            targetIP,
+    makeARPRequest(targetIP: string, iface: NetworkInterface): Packet {
+        const data: ARPData = {
+            type: ARPType.REQUEST,
+            senderIP: iface.ip,
+            senderMAC: iface.mac,
+            targetIP
         };
-
-        const arpPacket = new Packet(
-            ni.ip,
-            targetIP,
-            Protocol.ARP,
-            JSON.stringify(payload),
-            ni.mac,
-            "FF:FF:FF:FF:FF:FF" // Broadcast MAC
+        const pkt = new Packet(
+            iface.ip, targetIP, Protocol.ARP,
+            JSON.stringify(data), iface.mac, "FF:FF:FF:FF:FF:FF"
         );
-
-        console.log(`Router ${this.name}: Sending ARP request for ${targetIP}`);
-        return arpPacket;
+        console.log(`[${this.name}] ARP who-has ${targetIP}?`);
+        return pkt;
     }
 
-    public needsArpResolution(dstIp: string): { needed: boolean; targetIp: string; outInterface: NetworkInterface | null } {
-        const outInterface = this.findOutgoingInterface(dstIp);
-        if (!outInterface) return { needed: false, targetIp: dstIp, outInterface: null };
-        
-        const nextHopIp = dstIp;
-        const nextHopMAC = this.lookupARP(nextHopIp);
-        
-        return {
-            needed: !nextHopMAC,
-            targetIp: nextHopIp,
-            outInterface
-        };
-    }
+    // routing methods
+    clearRoutes(): void { this.routes = []; }
+    getRoutes(): Route[] { return [...this.routes]; }
 
-    // Receive Packets 
-
-    /**
-     * Handle an incoming ICMP packet
-     * @param packet - Packet received
-     * @returns ICMP Echo Reply if the packet is ICMP Echo Request for this router; otherwise null
-     */
-    receiveICMPpacket(packet: Packet): Packet | null {
-        const targetInterface = this.interfaces.find(ni => ni.ip === packet.dstIp);
-        if (!targetInterface) return null;
-
-        const isBroadcast = packet.dstMAC === "FF:FF:FF:FF:FF:FF";
-        const isForOurMAC = packet.dstMAC === targetInterface.mac;
-        if (!isBroadcast && !isForOurMAC) return null;
-
-        console.log(`Router ${this.name} received ICMP from ${packet.srcIp}: ${packet.payload || "ICMP Echo"}`);
-
-        if (packet.protocol === Protocol.ICMP && packet.payload === "ICMP Echo Request") {
-            const reply = new Packet(
-                targetInterface.ip,
-                packet.srcIp,
-                Protocol.ICMP,
-                "ICMP Echo Reply",
-                targetInterface.mac,
-                packet.srcMAC
-            );
-            reply.logHop(this);
-            return reply;
+    addRoute(destination: string, mask: string, outIface: NetworkInterface): void {
+        if (!NetworkInterface.isValidIP(destination) || !NetworkInterface.isValidSubnetMask(mask)) {
+            throw new Error(`bad route: ${destination}/${mask}`);
         }
-        return null;
-    }
-
-    /**
-     * Handle an incoming ARP packet
-     * @param packet - Packet received
-     * @returns ARP Reply if packet is a request for this router; otherwise null
-     */
-    receiveARPpacket(packet: Packet): Packet | null {
-        const arpPayload: ARPpayload = JSON.parse(packet.payload!);
-
-        if (arpPayload.senderIP && arpPayload.senderMAC)
-            this.addARPEntry(arpPayload.senderIP, arpPayload.senderMAC);
-
-        if (arpPayload.action === ARPpayloadType.REQUEST) {
-            const ourNI = this.interfaces.find(i => i.ip === arpPayload.targetIP);
-            if (ourNI) {
-                console.log(`Router ${this.name}: Received ARP request for ${arpPayload.targetIP}, replying...`);
-
-                const replyPayload: ARPpayload = {
-                    action: ARPpayloadType.REPLY,
-                    senderIP: ourNI.ip,
-                    senderMAC: ourNI.mac,
-                    targetIP: arpPayload.senderIP,
-                    targetMAC: arpPayload.senderMAC,
-                };
-
-                const reply = new Packet(
-                    ourNI.ip,
-                    arpPayload.senderIP,
-                    Protocol.ARP,
-                    JSON.stringify(replyPayload),
-                    ourNI.mac,
-                    arpPayload.senderMAC
-                );
-                reply.logHop(this);
-                return reply;
-            }
-        } else if (arpPayload.action === ARPpayloadType.REPLY) {
-            console.log(`Router ${this.name}: Received ARP reply from ${packet.srcIp}`);
-            this.addARPEntry(arpPayload.senderIP, arpPayload.senderMAC);
+        if (!this.interfaces.includes(outIface)) {
+            throw new Error(`interface not on this router`);
         }
-
-        return null;
-    }
-
-    /**
-     * Handle a general incoming packet
-     * @param packet - Packet received
-     * @returns Reply packet if generated (ARP/ICMP), otherwise null
-     */
-    receivePacket(packet: Packet): Packet | null {
-        this.cleanARPCache();
-        packet.logHop(this);
-
-        if (packet.srcMAC && packet.srcMAC !== "FF:FF:FF:FF:FF:FF")
-            this.addARPEntry(packet.srcIp, packet.srcMAC);
-
-        switch (packet.protocol) {
-            case Protocol.ARP: return this.receiveARPpacket(packet);
-            case Protocol.ICMP: return this.receiveICMPpacket(packet);
-            default: return null;
+        // check duplicate
+        if (this.routes.some(r => r.destination === destination && r.mask === mask)) {
+            throw new Error(`route exists: ${destination}/${mask}`);
         }
-    }
-
-    // Routing Methods
-
-    /**
-     * Clear all routes from the routing table
-     * Used before auto-configuration
-     */
-    clearRoutes(): void {
-        this.routingTable = [];
-    }
-
-    /**
-     * Get a copy of the routing table
-     * @returns Array of RouteEntry objects
-     */
-    getRoutingTable(): RouteEntry[] {
-        return [...this.routingTable];
-    }
-
-    /**
-     * Add a static route to the routing table
-     * @param destination - Network prefix (IPv4)
-     * @param mask - Subnet mask (IPv4)
-     * @param nextHopInterface - Interface to forward packets to
-     * @throws Error if route already exists or inputs are invalid
-     */
-    addRoute(destination: string, mask: string, nextHopInterface: NetworkInterface): void {
-        if (!NetworkInterface.isValidIP(destination) || !NetworkInterface.isValidSubnetMask(mask))
-            throw new Error(`Invalid network or mask: ${destination}/${mask}`);
-
-        if (!this.interfaces.includes(nextHopInterface))
-            throw new Error(`Next-hop interface does not belong to router ${this.name}`);
-
-        // already registered
-        if (this.routingTable.some(r => r.destination === destination && r.mask === mask))
-            throw new Error(`Route ${destination}/${mask} already exists`);
 
         const cidr = NetworkInterface.maskToCidr(mask);
-        const route: RouteEntry = { destination, mask, cidr, nextHopInterface, isDefault: destination === "0.0.0.0" && mask === "0.0.0.0" };
-
-        this.routingTable.push(route);
-        this.routingTable.sort((a, b) => b.cidr - a.cidr);
+        this.routes.push({
+            destination, mask, cidr, outInterface: outIface,
+            isDefault: destination === "0.0.0.0" && mask === "0.0.0.0"
+        });
+        // sort by longest prefix first
+        this.routes.sort((a, b) => b.cidr - a.cidr);
     }
 
-    /**
-     * Set default route (0.0.0.0/0) to a specific interface
-     * @param gatewayInterface - Interface for default route
-     */
-    setDefaultRoute(gatewayInterface: NetworkInterface): void {
-        this.addRoute("0.0.0.0", "0.0.0.0", gatewayInterface);
+    setDefaultRoute(iface: NetworkInterface): void {
+        this.addRoute("0.0.0.0", "0.0.0.0", iface);
     }
 
-    /**
-     * Look up the next hop interface for a destination IP using routing table
-     * @param dstIp - Destination IP
-     * @returns NetworkInterface for next hop or null if no route found
-     */
+    // find route for destination
     lookupRoute(dstIp: string): NetworkInterface | null {
-        for (const route of this.routingTable) {
-            if (this.ipMatchesRoute(dstIp, route.destination, route.mask)) return route.nextHopInterface;
+        for (const route of this.routes) {
+            if (this.matchesRoute(dstIp, route.destination, route.mask)) {
+                return route.outInterface;
+            }
         }
         return null;
     }
 
-    /**
-     * Check if IP belongs to a network prefix using subnet mask
-     * @param ip - IP address to check
-     * @param network - Network prefix
-     * @param mask - Subnet mask
-     * @returns True if IP is in network, false otherwise
-     */
-    private ipMatchesRoute(ip: string, network: string, mask: string): boolean {
+    private matchesRoute(ip: string, network: string, mask: string): boolean {
         const ipParts = ip.split(".").map(Number);
         const netParts = network.split(".").map(Number);
         const maskParts = mask.split(".").map(Number);
-
         for (let i = 0; i < 4; i++) {
             if ((ipParts[i]! & maskParts[i]!) !== (netParts[i]! & maskParts[i]!)) return false;
         }
         return true;
     }
 
-    /**
-     * Determine the outgoing interface for a given destination IP
-     * Checks direct subnet first, then routing table
-     * @param dstIp - Destination IP
-     * @returns NetworkInterface to forward to, or null if no route
-     */
-    private findOutgoingInterface(dstIp: string): NetworkInterface | null {
-        const direct = this.interfaces.find(intf => intf.isInSubnet(dstIp));
-        return direct || this.lookupRoute(dstIp);
+    // find best output interface
+    private findOutInterface(dstIp: string): NetworkInterface | null {
+        // check directly connected first
+        const direct = this.interfaces.find(i => i.isInSubnet(dstIp));
+        if (direct) return direct;
+        // check routing table
+        return this.lookupRoute(dstIp);
     }
 
-    // Firewall Methods
-
-    /**
-     * Add a firewall rule
-     * @param srcIp - Source IP to match, or "any"
-     * @param dstIp - Destination IP to match, or "any"
-     * @param protocol - Protocol to match (ICMP/TCP/UDP) or null
-     * @param action - ALLOW or DROP
-     * @param priority - Priority (lower = higher)
-     */
-    addRule(srcIp: string, dstIp: string, protocol: Protocol | null, action: FirewallAction, priority = 100): void {
-        if (!NetworkInterface.isValidIP(srcIp) && srcIp !== "any") throw new Error(`Invalid source IP: ${srcIp}`);
-        if (!NetworkInterface.isValidIP(dstIp) && dstIp !== "any") throw new Error(`Invalid destination IP: ${dstIp}`);
-
-        const rule: FirewallRule = { id: crypto.randomUUID(), srcIp, dstIp, protocol, action, priority };
-        this._rules.push(rule);
-        this._rules.sort((a, b) => a.priority - b.priority);
-    }
-
-    /**
-     * Get all firewall rules
-     * @returns Copy of the firewall rules array
-     */
-    getRules(): FirewallRule[] { return [...this._rules]; }
-
-    /**
-     * Set default firewall policy
-     * @param policy - ALLOW or DROP
-     */
-    setDefaultPolicy(policy: FirewallAction): void { this._defaultPolicy = policy; }
-
-    /**
-     * Evaluate a packet against firewall rules
-     * @param packet - Packet to check
-     * @returns True if allowed, false if dropped
-     */
-    private evaluateFirewall(packet: Packet): boolean {
-        for (const rule of this._rules) {
-            const srcMatch: boolean = rule.srcIp === "any" || rule.srcIp === packet.srcIp;
-            const dstMatch: boolean = rule.dstIp === "any" || rule.dstIp === packet.dstIp;
-            const protocolMatch = rule.protocol === null || rule.protocol === packet.protocol;
-
-            if (srcMatch && dstMatch && protocolMatch) {
-                if (rule.action === FirewallAction.DROP) {
-                    console.log(`Router ${this.name}: Firewall DROPPED packet from ${packet.srcIp} => ${packet.dstIp}`);
-                    return false;
-                }
-                else {
-                    console.log(`Router ${this.name}: Firewall ALLOWED packet from ${packet.srcIp} => ${packet.dstIp}`);
-                }
-                return true;
-            }
-        }
-
-        const allow: boolean = this._defaultPolicy === FirewallAction.ALLOW;
-        if(allow)
-            console.log(`Router ${this.name}: Firewall (DEFUALT RULE) ALLOWED packet from ${packet.srcIp} => ${packet.dstIp}`);
-        else
-            console.log(`Router ${this.name}: Firewall (DEFUALT RULE) DROPPED packet from ${packet.srcIp} => ${packet.dstIp}`);
-        return allow;
-    }
-    
-    // Packet Forwarding
-
-    /**
-     * Forward a packet through the router
-     * Steps: decrement TTL, update ARP, log hop, check firewall, find outgoing interface, ARP resolution
-     * @param packet - Packet to forward
-     * @param incomingInterface - Interface packet arrived from (optional)
-     * @returns Array of NetworkInterface(s) to forward packet to; empty if dropped
-     */
-    override forwardPacket(packet: Packet, incomingInterface?: NetworkInterface): NetworkInterface[] {
-        packet.decrementTTL();
-
-        if (packet.isExpired()) {
-            console.log(`Router ${this.name}: Packet ${packet.id} expired`);
-            return [];
-        }
-
-        if (incomingInterface && packet.srcMAC && packet.srcMAC !== "FF:FF:FF:FF:FF:FF") {
-            this.addARPEntry(packet.srcIp, packet.srcMAC);
-        }
-
-        packet.logHop(this);
-
-        if (!this.evaluateFirewall(packet)) return [];
-
-        const outInterface = this.findOutgoingInterface(packet.dstIp);
-
-        if (!outInterface) {
-            console.log(`Router ${this.name}: No route to ${packet.dstIp}, dropping packet ${packet.id}`);
-            return [];
-        }
-
-        packet.srcMAC = outInterface.mac;
+    // check if we need arp before forwarding
+    needsARP(dstIp: string): { needed: boolean; targetIp: string; outIface: NetworkInterface | null } {
+        const outIface = this.findOutInterface(dstIp);
+        if (!outIface) return { needed: false, targetIp: dstIp, outIface: null };
         
-        // Determine next hop IP
-        // If destination is in the same subnet as outInterface, next hop is the destination itself
-        // if not, wed need to look up next-hop router (but for directly connected networks, its the destination)
-        const nextHopIp = packet.dstIp;
-        const nextHopMAC = this.lookupARP(nextHopIp);
+        // determine what IP to ARP for:
+        // - if destination is directly connected, ARP for destination
+        // - if destination is remote (via route), ARP for destination on that interface
+        //   (in real networks, you'd ARP for next-hop, but our simplified model
+        //    routes packets to the right subnet where the destination lives)
+        const mac = this.lookupARP(dstIp);
+        return { needed: !mac, targetIp: dstIp, outIface };
+    }
 
-        if (nextHopMAC) {
-            packet.dstMAC = nextHopMAC;
-            console.log(`Router ${this.name}: Forwarding to ${packet.dstIp} via ${outInterface.ip} (MAC: ${nextHopMAC.slice(0, 8)}...)`);
-            return [outInterface];
-        } else {
-            // when ARP is needed but cache is pre-populated (test mode), it should still forward the packet
-            console.log(`Router ${this.name}: ARP miss for ${nextHopIp}`);
-            
-            packet.dstMAC = "FF:FF:FF:FF:FF:FF";
-            
-            return [outInterface]; // the Topology layer will handle ARP queueing
+    // handle incoming packets addressed to us
+    receivePacket(packet: Packet): Packet | null {
+        packet.addHop(this);
+
+        if (packet.srcMAC && packet.srcMAC !== "FF:FF:FF:FF:FF:FF") {
+            this.addARP(packet.srcIp, packet.srcMAC);
         }
+
+        switch (packet.protocol) {
+            case Protocol.ARP:
+                return this.handleARP(packet);
+            case Protocol.ICMP:
+                return this.handleICMP(packet);
+            default:
+                return null;
+        }
+    }
+
+    private handleARP(packet: Packet): Packet | null {
+        const data: ARPData = JSON.parse(packet.payload!);
+
+        if (data.senderIP && data.senderMAC) {
+            this.addARP(data.senderIP, data.senderMAC);
+        }
+
+        if (data.type === ARPType.REQUEST) {
+            const myIface = this.interfaces.find(i => i.ip === data.targetIP);
+            if (myIface) {
+                console.log(`[${this.name}] ARP reply ${myIface.ip}`);
+                const reply: ARPData = {
+                    type: ARPType.REPLY,
+                    senderIP: myIface.ip,
+                    senderMAC: myIface.mac,
+                    targetIP: data.senderIP,
+                    targetMAC: data.senderMAC
+                };
+                const pkt = new Packet(
+                    myIface.ip, data.senderIP, Protocol.ARP,
+                    JSON.stringify(reply), myIface.mac, data.senderMAC
+                );
+                pkt.addHop(this);
+                return pkt;
+            }
+        } else if (data.type === ARPType.REPLY) {
+            this.addARP(data.senderIP, data.senderMAC);
+        }
+        return null;
+    }
+
+    private handleICMP(packet: Packet): Packet | null {
+        const myIface = this.interfaces.find(i => i.ip === packet.dstIp);
+        if (!myIface) return null;
+        if (packet.dstMAC !== "FF:FF:FF:FF:FF:FF" && packet.dstMAC !== myIface.mac) return null;
+
+        console.log(`[${this.name}] got ICMP from ${packet.srcIp}`);
+
+        if (packet.payload === "ICMP Echo Request") {
+            const reply = new Packet(
+                myIface.ip, packet.srcIp, Protocol.ICMP,
+                "ICMP Echo Reply", myIface.mac, packet.srcMAC
+            );
+            reply.addHop(this);
+            return reply;
+        }
+        return null;
+    }
+
+    // forward packet to next hop
+    override forward(packet: Packet, incomingIface?: NetworkInterface): NetworkInterface[] {
+        // learn source mac first (before any early returns)
+        if (incomingIface && packet.srcMAC && packet.srcMAC !== "FF:FF:FF:FF:FF:FF") {
+            this.addARP(packet.srcIp, packet.srcMAC);
+        }
+
+        const outIface = this.findOutInterface(packet.dstIp);
+        if (!outIface) {
+            console.log(`[${this.name}] no route to ${packet.dstIp}`);
+            return [];
+        }
+
+        // try to resolve dst mac BEFORE modifying packet state
+        const dstMAC = this.lookupARP(packet.dstIp);
+        if (!dstMAC) {
+            // ARP miss - return empty array to let Simulator handle ARP resolution
+            // Don't modify packet (TTL, hop) yet - that happens when we actually forward
+            // This prevents the packet from being forwarded with broadcast MAC
+            // which would cause switches to flood it to all ports
+            console.log(`[${this.name}] arp miss for ${packet.dstIp}, waiting for ARP`);
+            return [];
+        }
+
+        // Now we can actually forward - apply packet modifications
+        packet.decrementTTL();
+        if (packet.isExpired()) {
+            console.log(`[${this.name}] packet expired`);
+            return [];
+        }
+
+        packet.addHop(this);
+
+        // update macs for next hop
+        packet.srcMAC = outIface.mac;
+        packet.dstMAC = dstMAC;
+        
+        console.log(`[${this.name}] forwarding to ${packet.dstIp}`);
+        return [outIface];
     }
 }

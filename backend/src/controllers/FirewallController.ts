@@ -1,90 +1,63 @@
-import type { Request, Response } from "express";
 import { StatusCodes } from "http-status-codes";
-import { asyncHandler, AppError } from "../middleware/errorHandler.js";
+
+import type { Request, Response } from "express";
+import { AppError, asyncHandler } from "../middleware/errorHandler.js";
 import FirewallService from "../services/FirewallService.js";
 
 class FirewallController {
-    /**
-     * GET /api/nodes/:nodeId/firewall/rules
-     * Get all firewall rules for a router
-     */
-    getAllFirewallRules = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const { nodeId } = req.params;
-
-        if (!nodeId)
-            throw new AppError(StatusCodes.BAD_REQUEST, "Node ID is required");
-
-        const { node, rules } = await FirewallService.getAllFirewallRules(nodeId);
-
-        res.json({
-            success: true,
-            nodeId,
-            nodeName: node.name,
-            count: rules.length,
-            rules
-        });
+    // GET /nodes/:nodeId/rules
+    // returns all firewall rules for a specific node (must be ROUTER)
+    getAll = asyncHandler(async (req: Request, res: Response) => {
+        if (!req.params.nodeId) throw new AppError(StatusCodes.BAD_REQUEST, "nodeId required");
+        const { node, rules } = await FirewallService.getAll(req.params.nodeId);
+        res.json({ success: true, node, rules });
     });
 
-    /**
-     * POST /api/nodes/:nodeId/firewall/rules
-     * Add a firewall rule to a router
-     * Body: { srcIp: string, dstIp: string, protocol?: string, action: string, priority?: number }
-     */
-    createFirewallRule = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const { nodeId } = req.params;
-
-        if (!nodeId)
-            throw new AppError(StatusCodes.BAD_REQUEST, "Node ID is required");
-
-        const { srcIp, dstIp, protocol, action, priority = 100 } = req.body;
-
-        const rule = await FirewallService.createFirewallRule(nodeId, srcIp, dstIp, protocol, action, priority);
-
-        res.status(StatusCodes.CREATED).json({
-            success: true,
-            message: "Firewall rule created successfully",
-            rule
-        });
+    // GET /nodes/:nodeId/rules/:ruleId
+    // returns a specific firewall rule by id
+    getById = asyncHandler(async (req: Request, res: Response) => {
+        if (!req.params.nodeId || !req.params.ruleId) {
+            throw new AppError(StatusCodes.BAD_REQUEST, "nodeId and ruleId required");
+        }
+        const rule = await FirewallService.getById(req.params.nodeId, req.params.ruleId);
+        res.json({ success: true, rule });
     });
 
-    /**
-     * PUT /api/nodes/:nodeId/firewall/rules/:ruleId
-     * Update a firewall rule
-     */
-    updateFirewallRule = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const { nodeId, ruleId } = req.params;
-
-        if (!nodeId || !ruleId)
-            throw new AppError(StatusCodes.BAD_REQUEST, "Node ID and Rule ID are required");
-
-        const { srcIp, dstIp, protocol, action, priority } = req.body;
-
-        const rule = await FirewallService.updateFirewallRule(nodeId, ruleId, srcIp, dstIp, protocol, action, priority);
-
-        res.json({
-            success: true,
-            message: "Firewall rule updated successfully",
-            rule
-        });
+    // POST /nodes/:nodeId/rules
+    // body { srcIp, dstIp, action, priority, protocol? }
+    // srcIp/dstIp: "any" or specific IP or CIDR notation (e.g. "192.168.1.0/24")
+    // action: "ALLOW" or "DROP"
+    // priority: lower number = higher priority (checked first)
+    create = asyncHandler(async (req: Request, res: Response) => {
+        if (!req.params.nodeId) throw new AppError(StatusCodes.BAD_REQUEST, "nodeId required");
+        const { srcIp, dstIp, action, priority, protocol } = req.body;
+        const rule = await FirewallService.create(
+            req.params.nodeId, srcIp, dstIp, action, priority, protocol
+        );
+        res.status(201).json({ success: true, rule });
+    });
+    
+    // PUT /nodes/:nodeId/rules/:ruleId
+    // body { srcIp?, dstIp?, action?, priority?, protocol? }
+    update = asyncHandler(async (req: Request, res: Response) => {
+        if (!req.params.nodeId || !req.params.ruleId) {
+            throw new AppError(StatusCodes.BAD_REQUEST, "nodeId and ruleId required");
+        }
+        const { srcIp, dstIp, action, priority, protocol } = req.body;
+        const rule = await FirewallService.update(
+            req.params.nodeId, req.params.ruleId,
+            srcIp, dstIp, action, priority, protocol
+        );
+        res.json({ success: true, rule });
     });
 
-    /**
-     * DELETE /api/nodes/:nodeId/firewall/rules/:ruleId
-     * Delete a firewall rule
-     */
-    deleteFirewallRule = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const { nodeId, ruleId } = req.params;
-
-        if (!nodeId || !ruleId)
-            throw new AppError(StatusCodes.BAD_REQUEST, "Node ID and Rule ID are required");
-
-        const deleted = await FirewallService.deleteFirewallRule(nodeId, ruleId);
-
-        res.json({
-            success: true,
-            message: "Firewall rule deleted successfully",
-            deleted
-        });
+    // DELETE /nodes/:nodeId/rules/:ruleId
+    delete = asyncHandler(async (req: Request, res: Response) => {
+        if (!req.params.nodeId || !req.params.ruleId) {
+            throw new AppError(StatusCodes.BAD_REQUEST, "nodeId and ruleId required");
+        }
+        const deleted = await FirewallService.delete(req.params.nodeId, req.params.ruleId);
+        res.json({ success: true, deleted });
     });
 }
 

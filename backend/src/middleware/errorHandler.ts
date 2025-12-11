@@ -1,10 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { StatusCodes } from "http-status-codes";
 
-/**
- * Custom error class for handling application-specific errors
- * makes it easier to throw errors with specific status codes throughout the app
- */
+// custom error with status code
 export class AppError extends Error {
     constructor(public statusCode: number, message: string) {
         super(message);
@@ -12,44 +9,27 @@ export class AppError extends Error {
     }
 }
 
-/**
- * Global error handler middleware
- * Catches all errors thrown in the application and sends consistent error responses
- * Should be the last middleware in server.ts !!!
- */
-export const errorHandler = (
-    err: Error | AppError,
-    req: Request,
-    res: Response,
-    next: NextFunction
-) => {
-    console.error("Error:", err.message);
+// global error handler
+export function errorHandler(err: Error | AppError, req: Request, res: Response, next: NextFunction) {
+    console.error("err:", err.message);
 
     if (err instanceof AppError) {
         return res.status(err.statusCode).json({
             success: false,
-            error: {
-                message: err.message,
-                statusCode: err.statusCode
-            }
+            error: err.message
         });
     }
 
-    // unexpected errors
+    // unexpected error
     return res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
         success: false,
-        error: {
-            message: "Server Error",
-            statusCode: StatusCodes.INTERNAL_SERVER_ERROR
-        }
+        error: "server error"
     });
-};
-/**
- * Wrapper for async route handlers to avoid repetitive try-catch
- * example: router.get('/path', asyncHandler(async (req, res) => { ... }))
- */
-export const asyncHandler = (fn: Function) => {
+}
+
+// wrapper to avoid try/catch everywhere
+export function asyncHandler(fn: Function) {
     return (req: Request, res: Response, next: NextFunction) => {
         Promise.resolve(fn(req, res, next)).catch(next);
     };
-};
+}

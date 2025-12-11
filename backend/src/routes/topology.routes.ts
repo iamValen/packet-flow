@@ -3,11 +3,11 @@ import TopologyController from "../controllers/TopologyController.js";
 
 const router = Router();
 
-router.get("/", TopologyController.getAllTopologies);
-router.get("/:id", TopologyController.getTopologyById);
-router.post("/", TopologyController.createTopology);
-router.put("/:id", TopologyController.updateTopology);
-router.delete("/:id", TopologyController.deleteTopology);
-router.get("/:id/nodes", TopologyController.getTopologyNodes);
+router.get("/", TopologyController.getAll);
+router.get("/:id", TopologyController.getById);
+router.post("/", TopologyController.create);
+router.put("/:id", TopologyController.update);
+router.delete("/:id", TopologyController.delete);
+router.get("/:id/nodes", TopologyController.getNodes);
 
 export default router;

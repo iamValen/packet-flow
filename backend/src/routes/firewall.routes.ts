@@ -3,9 +3,9 @@ import FirewallController from "../controllers/FirewallController.js";
 
 const firewallRouter = Router({ mergeParams: true });
 
-firewallRouter.get("/rules", FirewallController.getAllFirewallRules);
-firewallRouter.post("/rules", FirewallController.createFirewallRule);
-firewallRouter.put("/rules/:ruleId", FirewallController.updateFirewallRule);
-firewallRouter.delete("/rules/:ruleId", FirewallController.deleteFirewallRule);
+firewallRouter.get("/", FirewallController.getAll);
+firewallRouter.post("/", FirewallController.create);
+firewallRouter.put("/:ruleId", FirewallController.update);
+firewallRouter.delete("/:ruleId", FirewallController.delete);
 
 export default firewallRouter;

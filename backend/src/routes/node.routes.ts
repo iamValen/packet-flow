@@ -3,11 +3,11 @@ import NodeController from "../controllers/NodeController.js";
 
 const nodeRouter = Router({ mergeParams: true });
 
-nodeRouter.get("/", NodeController.getAllNodes);
-nodeRouter.post("/", NodeController.createNode);
-nodeRouter.get("/:nodeId", NodeController.getNodeById);
-nodeRouter.put("/:nodeId", NodeController.updateNode);
-nodeRouter.put("/:nodeId/position", NodeController.updateNodePosition);
-nodeRouter.delete("/:nodeId", NodeController.deleteNode);
+nodeRouter.get("/", NodeController.getAll);
+nodeRouter.post("/", NodeController.create);
+nodeRouter.get("/:nodeId", NodeController.getById);
+nodeRouter.put("/:nodeId", NodeController.update);
+nodeRouter.put("/:nodeId/position", NodeController.updatePosition);
+nodeRouter.delete("/:nodeId", NodeController.delete);
 
 export default nodeRouter;

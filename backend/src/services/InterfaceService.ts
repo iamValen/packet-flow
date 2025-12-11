@@ -1,340 +1,157 @@
 import { StatusCodes } from "http-status-codes";
+
 import { prisma } from "../prisma.js";
 import { AppError } from "../middleware/errorHandler.js";
 import { NetworkInterface } from "../models/NetworkInterface.js";
 
 class InterfaceService {
-    async getAllInterfaces(nodeId: string) {
-        if (!nodeId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Node ID is required");
-        }
-
+    async getAll(nodeId: string) {
         const node = await prisma.node.findUnique({
             where: { id: nodeId },
-            include: {
-                topology: {
-                    select: { id: true, name: true }
-                }
-            }
+            include: { topology: { select: { id: true, name: true } } }
         });
+        if (!node) throw new AppError(StatusCodes.NOT_FOUND, "node not found");
 
-        if (!node) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Node not found");
-        }
-
-        const interfaces = await prisma.networkInterface.findMany({
+        const ifaces = await prisma.networkInterface.findMany({
             where: { nodeId },
-            include: {
-                linksAsA: {
-                    include: {
-                        interfaceB: true,
-                        nodeB: true
-                    }
-                },
-                linksAsB: {
-                    include: {
-                        interfaceA: true,
-                        nodeA: true
-                    }
-                }
-            },
-            orderBy: { createdAt: 'asc' }
+            orderBy: { createdAt: "asc" }
         });
-
-        return { node, interfaces };
+        return { node, interfaces: ifaces };
     }
 
-    async getInterfaceById(nodeId: string, interfaceId: string) {
-        if (!nodeId || !interfaceId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Node ID and Interface ID are required");
-        }
-
-        const iface = await prisma.networkInterface.findUnique({
-            where: { id: interfaceId },
-            include: {
-                node: {
-                    select: {
-                        id: true,
-                        name: true,
-                        type: true
-                    }
-                },
-                linksAsA: {
-                    include: {
-                        interfaceB: true,
-                        nodeB: true
-                    }
-                },
-                linksAsB: {
-                    include: {
-                        interfaceA: true,
-                        nodeA: true
-                    }
-                }
-            }
-        });
-
-        if (!iface) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Interface not found");
-        }
-
-        if (iface.nodeId !== nodeId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Interface does not belong to this node");
-        }
-
+    async getById(nodeId: string, ifaceId: string) {
+        const iface = await prisma.networkInterface.findUnique({ where: { id: ifaceId } });
+        if (!iface) throw new AppError(StatusCodes.NOT_FOUND, "interface not found");
+        if (iface.nodeId !== nodeId) throw new AppError(StatusCodes.BAD_REQUEST, "wrong node");
         return iface;
     }
 
-    async createInterface(nodeId: string, ip?: string, mask?: string, cidr?: string, mac?: string) {
-        if (!nodeId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Node ID is required");
-        }
+    async create(nodeId: string, ip?: string, mask?: string, cidr?: string, mac?: string) {
+        const node = await prisma.node.findUnique({ where: { id: nodeId } });
+        if (!node) throw new AppError(StatusCodes.NOT_FOUND, "node not found");
 
-        const node = await prisma.node.findUnique({
-            where: { id: nodeId }
-        });
+        let finalIp: string, finalMask: string, finalCidr: number;
 
-        if (!node) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Node not found");
-        }
-
-        let finalIp: string;
-        let finalMask: string;
-        let finalCidr: number;
-        let finalMac: string;
-
+        // parse cidr notation or ip/mask
         if (cidr) {
             const [ipPart, prefix] = cidr.split("/");
-            if (!ipPart || !prefix) {
-                throw new AppError(StatusCodes.BAD_REQUEST, "Invalid CIDR notation");
-            }
-
+            if (!ipPart || !prefix) throw new AppError(StatusCodes.BAD_REQUEST, "bad cidr");
             finalIp = ipPart;
             const prefixNum = parseInt(prefix, 10);
-            
-            if (!NetworkInterface.isValidIP(finalIp)) {
-                throw new AppError(StatusCodes.BAD_REQUEST, `Invalid IP address: ${finalIp}`);
-            }
-
             if (isNaN(prefixNum) || prefixNum < 0 || prefixNum > 32) {
-                throw new AppError(StatusCodes.BAD_REQUEST, `Invalid CIDR prefix: ${prefix}. Must be between 0 and 32`);
+                throw new AppError(StatusCodes.BAD_REQUEST, `bad prefix: ${prefix}`);
             }
-
+            if (!NetworkInterface.isValidIP(finalIp)) throw new AppError(StatusCodes.BAD_REQUEST, `bad ip: ${finalIp}`);
             finalMask = NetworkInterface.cidrToMask(prefixNum);
             finalCidr = prefixNum;
         } else if (ip && mask) {
-            if (!NetworkInterface.isValidIP(ip)) {
-                throw new AppError(StatusCodes.BAD_REQUEST, `Invalid IP address: ${ip}`);
-            }
-            if (!NetworkInterface.isValidSubnetMask(mask)) {
-                throw new AppError(StatusCodes.BAD_REQUEST, `Invalid subnet mask: ${mask}`);
-            }
-
+            if (!NetworkInterface.isValidIP(ip)) throw new AppError(StatusCodes.BAD_REQUEST, `bad ip: ${ip}`);
+            if (!NetworkInterface.isValidSubnetMask(mask)) throw new AppError(StatusCodes.BAD_REQUEST, `bad mask: ${mask}`);
             finalIp = ip;
             finalMask = mask;
             finalCidr = NetworkInterface.maskToCidr(mask);
         } else {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Either 'cidr' or both 'ip' and 'mask' are required");
+            throw new AppError(StatusCodes.BAD_REQUEST, "need cidr or ip+mask");
         }
 
-        if (mac) {
-            if (!NetworkInterface.isValidMAC(mac)) {
-                throw new AppError(StatusCodes.BAD_REQUEST, `Invalid MAC address: ${mac}`);
-            }
-            finalMac = mac.toUpperCase();
-        } else {
-            finalMac = NetworkInterface.generateMAC();
+        // generate mac if not provided
+        let finalMac = mac?.toUpperCase() || NetworkInterface.generateMAC();
+        if (mac && !NetworkInterface.isValidMAC(mac)) {
+            throw new AppError(StatusCodes.BAD_REQUEST, `bad mac: ${mac}`);
         }
 
-        const existingIP = await prisma.networkInterface.findFirst({
-            where: {
-                node: {
-                    topologyId: node.topologyId
-                },
-                ip: finalIp
-            },
-            include: {
-                node: {
-                    select: { name: true }
-                }
-            }
+        // check ip not taken in this topology
+        const existing = await prisma.networkInterface.findFirst({
+            where: { node: { topologyId: node.topologyId }, ip: finalIp }
         });
+        if (existing) throw new AppError(StatusCodes.CONFLICT, `ip ${finalIp} already used`);
 
-        if (existingIP) {
-            throw new AppError(StatusCodes.CONFLICT, `IP address ${finalIp} is already in use by ${existingIP.node.name}`);
-        }
-
+        // calc network and broadcast
         const niModel = new NetworkInterface(finalIp, finalMask, finalMac);
-        const networkAddress = niModel.getNetworkAddress();
-        const broadcastAddress = niModel.getBroadcastAddress();
+        const networkAddr = niModel.getNetworkAddress();
+        const broadcastAddr = niModel.getBroadcastAddress();
 
-        const iface = await prisma.networkInterface.create({
+        return await prisma.networkInterface.create({
             data: {
                 ip: finalIp,
                 mask: finalMask,
                 cidr: finalCidr,
                 mac: finalMac,
-                networkAddress,
-                broadcastAddress,
+                networkAddress: networkAddr,
+                broadcastAddress: broadcastAddr,
                 nodeId
-            },
-            include: {
-                node: {
-                    select: {
-                        id: true,
-                        name: true,
-                        type: true
-                    }
-                }
             }
         });
-
-        return iface;
     }
 
-    async updateInterface(nodeId: string, interfaceId: string, ip?: string, mask?: string, cidr?: string) {
-        if (!nodeId || !interfaceId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Node ID and Interface ID are required");
-        }
-
-        const existingInterface = await prisma.networkInterface.findUnique({
-            where: { id: interfaceId },
+    async update(nodeId: string, ifaceId: string, ip?: string, mask?: string, cidr?: string) {
+        const iface = await prisma.networkInterface.findUnique({
+            where: { id: ifaceId },
             include: { node: true }
         });
+        if (!iface) throw new AppError(StatusCodes.NOT_FOUND, "interface not found");
+        if (iface.nodeId !== nodeId) throw new AppError(StatusCodes.BAD_REQUEST, "wrong node");
 
-        if (!existingInterface) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Interface not found");
-        }
-
-        if (existingInterface.nodeId !== nodeId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Interface does not belong to this node");
-        }
-
-        let finalIp: string = existingInterface.ip;
-        let finalMask: string = existingInterface.mask;
-        let finalCidr: number = existingInterface.cidr;
+        let finalIp = iface.ip;
+        let finalMask = iface.mask;
+        let finalCidr = iface.cidr;
 
         if (cidr) {
             const [ipPart, prefix] = cidr.split("/");
-            if (!ipPart || !prefix) {
-                throw new AppError(StatusCodes.BAD_REQUEST, "Invalid CIDR notation");
-            }
-            if (!NetworkInterface.isValidIP(ipPart)) {
-                throw new AppError(StatusCodes.BAD_REQUEST, `Invalid IP address: ${ipPart}`);
-            }
-
+            if (!ipPart || !prefix) throw new AppError(StatusCodes.BAD_REQUEST, "bad cidr");
+            if (!NetworkInterface.isValidIP(ipPart)) throw new AppError(StatusCodes.BAD_REQUEST, `bad ip: ${ipPart}`);
             const prefixNum = parseInt(prefix, 10);
             if (isNaN(prefixNum) || prefixNum < 0 || prefixNum > 32) {
-                throw new AppError(StatusCodes.BAD_REQUEST, `Invalid CIDR prefix: ${prefix}. Must be between 0 and 32`);
+                throw new AppError(StatusCodes.BAD_REQUEST, `bad prefix: ${prefix}`);
             }
-
             finalIp = ipPart;
             finalMask = NetworkInterface.cidrToMask(prefixNum);
             finalCidr = prefixNum;
         } else {
             if (ip !== undefined) {
-                if (!NetworkInterface.isValidIP(ip)) {
-                    throw new AppError(StatusCodes.BAD_REQUEST, `Invalid IP address: ${ip}`);
-                }
+                if (!NetworkInterface.isValidIP(ip)) throw new AppError(StatusCodes.BAD_REQUEST, `bad ip: ${ip}`);
                 finalIp = ip;
             }
-
             if (mask !== undefined) {
-                if (!NetworkInterface.isValidSubnetMask(mask)) {
-                    throw new AppError(StatusCodes.BAD_REQUEST, `Invalid subnet mask: ${mask}`);
-                }
+                if (!NetworkInterface.isValidSubnetMask(mask)) throw new AppError(StatusCodes.BAD_REQUEST, `bad mask: ${mask}`);
                 finalMask = mask;
                 finalCidr = NetworkInterface.maskToCidr(mask);
             }
         }
 
-        if (finalIp !== existingInterface.ip) {
-            const duplicate = await prisma.networkInterface.findFirst({
+        // check ip not taken by another interface
+        if (finalIp !== iface.ip) {
+            const existing = await prisma.networkInterface.findFirst({
                 where: {
-                    node: {
-                        topologyId: existingInterface.node.topologyId
-                    },
+                    node: { topologyId: iface.node.topologyId },
                     ip: finalIp,
-                    id: { not: interfaceId }
-                },
-                include: {
-                    node: {
-                        select: { name: true }
-                    }
+                    id: { not: ifaceId }
                 }
             });
-
-            if (duplicate) {
-                throw new AppError(StatusCodes.CONFLICT, `IP address ${finalIp} is already in use by ${duplicate.node.name}`);
-            }
+            if (existing) throw new AppError(409, `ip ${finalIp} already used`);
         }
 
-        const niModel = new NetworkInterface(finalIp, finalMask, existingInterface.mac);
-        const networkAddress = niModel.getNetworkAddress();
-        const broadcastAddress = niModel.getBroadcastAddress();
+        const niModel = new NetworkInterface(finalIp, finalMask, iface.mac);
 
-        const iface = await prisma.networkInterface.update({
-            where: { id: interfaceId },
+        return await prisma.networkInterface.update({
+            where: { id: ifaceId },
             data: {
                 ip: finalIp,
                 mask: finalMask,
                 cidr: finalCidr,
-                networkAddress,
-                broadcastAddress
-            },
-            include: {
-                node: {
-                    select: {
-                        id: true,
-                        name: true,
-                        type: true
-                    }
-                }
+                networkAddress: niModel.getNetworkAddress(),
+                broadcastAddress: niModel.getBroadcastAddress()
             }
         });
-
-        return iface;
     }
 
-    async deleteInterface(nodeId: string, interfaceId: string) {
-        if (!nodeId || !interfaceId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Node ID and Interface ID are required");
-        }
+    async delete(nodeId: string, ifaceId: string) {
+        const iface = await prisma.networkInterface.findUnique({ where: { id: ifaceId } });
+        if (!iface) throw new AppError(StatusCodes.NOT_FOUND, "interface not found");
+        if (iface.nodeId !== nodeId) throw new AppError(StatusCodes.BAD_REQUEST, "wrong node");
 
-        const iface = await prisma.networkInterface.findUnique({
-            where: { id: interfaceId },
-            include: {
-                node: {
-                    select: { name: true }
-                },
-                _count: {
-                    select: {
-                        linksAsA: true,
-                        linksAsB: true
-                    }
-                }
-            }
-        });
-
-        if (!iface) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Interface not found");
-        }
-
-        if (iface.nodeId !== nodeId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Interface does not belong to this node");
-        }
-
-        await prisma.networkInterface.delete({
-            where: { id: interfaceId }
-        });
-
-        return {
-            id: iface.id,
-            ip: iface.ip,
-            mac: iface.mac,
-            nodeName: iface.node.name,
-            linksCount: iface._count.linksAsA + iface._count.linksAsB
-        };
+        await prisma.networkInterface.delete({ where: { id: ifaceId } });
+        return { id: iface.id, ip: iface.ip };
     }
 }
 

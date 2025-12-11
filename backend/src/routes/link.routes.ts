@@ -3,12 +3,12 @@ import LinkController from "../controllers/LinkController.js";
 
 const linkRouter = Router({ mergeParams: true });
 
-linkRouter.get("/", LinkController.getAllLinks);
-linkRouter.post("/", LinkController.createLink);
-linkRouter.get("/:linkId", LinkController.getLinkById);
-linkRouter.delete("/:linkId", LinkController.deleteLink);
+linkRouter.get("/", LinkController.getAll);
+linkRouter.post("/", LinkController.create);
+linkRouter.get("/:linkId", LinkController.getById);
+linkRouter.delete("/:linkId", LinkController.delete);
 
 export default linkRouter;
 
 export const nodeLinkRouter = Router({ mergeParams: true });
-nodeLinkRouter.get("/", LinkController.getLinksForNode);
+nodeLinkRouter.get("/", LinkController.getForNode);

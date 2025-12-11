@@ -1,236 +1,96 @@
-import { StatusCodes } from "http-status-codes";
 import { prisma } from "../prisma.js";
 import { AppError } from "../middleware/errorHandler.js";
 import { NetworkInterface } from "../models/NetworkInterface.js";
+import { StatusCodes } from "http-status-codes";
+import { NodeType } from "../models/Node.js";
 
 class NodeService {
-    async getAllNodes(topologyId: string) {
-        if (!topologyId)
-            throw new AppError(StatusCodes.BAD_REQUEST, "Topology ID is required");
+    async getAll(topologyId: string) {
+        const topo = await prisma.topology.findUnique({ where: { id: topologyId } });
+        if (!topo) throw new AppError(StatusCodes.NOT_FOUND, "topology not found");
 
-        const topology = await prisma.topology.findUnique({
-            where: { id: topologyId }
-        });
-
-        if (!topology){
-            throw new AppError(StatusCodes.NOT_FOUND, "Topology not found");
-        }
         const nodes = await prisma.node.findMany({
             where: { topologyId },
-            include: {
-                interfaces: true,
-                _count: {
-                    select: {
-                        interfaces: true,
-                        linksAsA: true,
-                        linksAsB: true
-                    }
-                }
-            },
-            orderBy: { createdAt: 'asc' }
+            include: { interfaces: true },
+            orderBy: { createdAt: "asc" }
         });
-
-        return { topology, nodes };
+        return { topology: topo, nodes };
     }
 
-    async getNodeById(topologyId: string, nodeId: string) {
-        if (!topologyId || !nodeId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Topology ID and Node ID are required");
-        }
-
+    async getById(topologyId: string, nodeId: string) {
         const node = await prisma.node.findUnique({
             where: { id: nodeId },
-            include: {
-                topology: true,
-                interfaces: true,
-                routingEntries: {
-                    include: { nextHopInterface: true }
-                },
-                firewallRules: true,
-                _count: {
-                    select: {
-                        interfaces: true,
-                        linksAsA: true,
-                        linksAsB: true
-                    }
-                }
-            }
+            include: { interfaces: true }
         });
-
-        if (!node) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Node not found");
-        }
-
-        if (node.topologyId !== topologyId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Node does not belong to this topology");
-        }
-
+        if (!node) throw new AppError(StatusCodes.NOT_FOUND, "node not found");
+        if (node.topologyId !== topologyId) throw new AppError(StatusCodes.BAD_REQUEST, "wrong topology");
         return node;
     }
 
-    async createNode(topologyId: string, name: string, type: string, positionX: number, positionY: number, defaultGateway?: string) {
-        if (!topologyId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Topology ID is required");
+    async create(topologyId: string, name: string, type: NodeType, x: number, y: number, gateway?: string) {
+        if (!name || !type) throw new AppError(StatusCodes.BAD_REQUEST, "name and type required");
+        if (!Object.values(NodeType).includes(type)) throw new AppError(StatusCodes.BAD_REQUEST, "invalid type");
+
+        const topo = await prisma.topology.findUnique({ where: { id: topologyId } });
+        if (!topo) throw new AppError(StatusCodes.NOT_FOUND, "topology not found");
+
+        if (gateway && !NetworkInterface.isValidIP(gateway)) {
+            throw new AppError(StatusCodes.BAD_REQUEST, `bad gateway: ${gateway}`);
         }
 
-        if (!name || !type) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Name and type are required");
-        }
-
-        if (!["HOST", "ROUTER", "SWITCH"].includes(type)) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Type must be HOST, ROUTER, or SWITCH");
-        }
-
-        if (positionX === undefined || positionY === undefined) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Position X and Y are required");
-        }
-
-        const topology = await prisma.topology.findUnique({
-            where: { id: topologyId }
-        });
-
-        if (!topology) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Topology not found");
-        }
-
-        if (defaultGateway && !NetworkInterface.isValidIP(defaultGateway)) {
-            throw new AppError(StatusCodes.BAD_REQUEST, `Invalid default gateway IP: ${defaultGateway}`);
-        }
-
-        const node = await prisma.node.create({
+        return await prisma.node.create({
             data: {
                 name,
-                type: type as "HOST" | "ROUTER" | "SWITCH",
-                positionX: Number(positionX),
-                positionY: Number(positionY),
-                defaultGateway: defaultGateway || null,
+                type: type as NodeType,
+                positionX: Number(x),
+                positionY: Number(y),
+                defaultGateway: gateway || null,
                 topologyId
             },
-            include: {
-                topology: true,
-                interfaces: true
-            }
+            include: { interfaces: true }
         });
-
-        return node;
     }
 
-    async updateNode(topologyId: string, nodeId: string, name?: string, defaultGateway?: string) {
-        if (!topologyId || !nodeId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Topology ID and Node ID are required");
-        }
+    async update(topologyId: string, nodeId: string, name?: string, gateway?: string) {
+        const node = await prisma.node.findUnique({ where: { id: nodeId } });
+        if (!node) throw new AppError(StatusCodes.NOT_FOUND, "node not found");
+        if (node.topologyId !== topologyId) throw new AppError(StatusCodes.BAD_REQUEST, "wrong topology");
 
-        const existing = await prisma.node.findUnique({
-            where: { id: nodeId }
-        });
-
-        if (!existing) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Node not found");
-        }
-
-        if (existing.topologyId !== topologyId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Node does not belong to this topology");
-        }
-
-        const updateData: any = {};
-
-        if (name !== undefined) {
-            updateData.name = name;
-        }
-
-        if (defaultGateway !== undefined) {
-            if (defaultGateway && !NetworkInterface.isValidIP(defaultGateway)) {
-                throw new AppError(StatusCodes.BAD_REQUEST, `Invalid default gateway IP: ${defaultGateway}`);
+        const data: any = {};
+        if (name !== undefined) data.name = name;
+        if (gateway !== undefined) {
+            if (gateway && !NetworkInterface.isValidIP(gateway)) {
+                throw new AppError(StatusCodes.BAD_REQUEST, `bad gateway: ${gateway}`);
             }
-            updateData.defaultGateway = defaultGateway || null;
+            data.defaultGateway = gateway || null;
         }
 
-        const node = await prisma.node.update({
+        return await prisma.node.update({
             where: { id: nodeId },
-            data: updateData,
-            include: {
-                topology: true,
-                interfaces: true
-            }
+            data,
+            include: { interfaces: true }
         });
-
-        return node;
     }
 
-    async updateNodePosition(topologyId: string, nodeId: string, positionX: number, positionY: number) {
-        if (!topologyId || !nodeId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Topology ID and Node ID are required");
-        }
+    async updatePosition(topologyId: string, nodeId: string, x: number, y: number) {
+        const node = await prisma.node.findUnique({ where: { id: nodeId } });
+        if (!node) throw new AppError(StatusCodes.NOT_FOUND, "node not found");
+        if (node.topologyId !== topologyId) throw new AppError(StatusCodes.BAD_REQUEST, "wrong topology");
 
-        if (positionX === undefined || positionY === undefined) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Position X and Y are required");
-        }
-
-        const existing = await prisma.node.findUnique({
-            where: { id: nodeId }
-        });
-
-        if (!existing) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Node not found");
-        }
-
-        if (existing.topologyId !== topologyId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Node does not belong to this topology");
-        }
-
-        const node = await prisma.node.update({
+        return await prisma.node.update({
             where: { id: nodeId },
-            data: {
-                positionX: Number(positionX),
-                positionY: Number(positionY)
-            },
-            include: {
-                topology: true,
-                interfaces: true
-            }
+            data: { positionX: Number(x), positionY: Number(y) },
+            include: { interfaces: true }
         });
-
-        return node;
     }
 
-    async deleteNode(topologyId: string, nodeId: string) {
-        if (!topologyId || !nodeId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Topology ID and Node ID are required");
-        }
+    async delete(topologyId: string, nodeId: string) {
+        const node = await prisma.node.findUnique({ where: { id: nodeId } });
+        if (!node) throw new AppError(StatusCodes.NOT_FOUND, "node not found");
+        if (node.topologyId !== topologyId) throw new AppError(StatusCodes.BAD_REQUEST, "wrong topology");
 
-        const node = await prisma.node.findUnique({
-            where: { id: nodeId },
-            include: {
-                interfaces: true,
-                _count: {
-                    select: {
-                        interfaces: true,
-                        linksAsA: true,
-                        linksAsB: true
-                    }
-                }
-            }
-        });
-
-        if (!node) {
-            throw new AppError(StatusCodes.NOT_FOUND, "Node not found");
-        }
-
-        if (node.topologyId !== topologyId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Node does not belong to this topology");
-        }
-
-        await prisma.node.delete({
-            where: { id: nodeId }
-        });
-
-        return {
-            id: node.id,
-            name: node.name,
-            type: node.type,
-            interfacesCount: node._count.interfaces,
-            linksCount: node._count.linksAsA + node._count.linksAsB
-        };
+        await prisma.node.delete({ where: { id: nodeId } });
+        return { id: node.id, name: node.name };
     }
 }
 

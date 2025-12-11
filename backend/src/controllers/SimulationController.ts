@@ -1,205 +1,122 @@
 import type { Request, Response } from "express";
-import { StatusCodes } from "http-status-codes";
-
 import { AppError, asyncHandler } from "../middleware/errorHandler.js";
 import SimulationService from "../services/SimulationService.js";
+import { StatusCodes } from "http-status-codes";
 
 class SimulationController {
-
-    /**
-     * GET /api/topologies/:topologyId/simulations
-     */
-    getAllSimulations = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const { topologyId } = req.params;
-
-        if (!topologyId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Topology ID is required");
-        }
-
-        const simulations = await SimulationService.getAllSimulations(topologyId);
-
-        res.json({ simulations });
+    // GET /topologies/:topologyId/simulations
+    getAllSimulations = asyncHandler(async (req: Request, res: Response) => {
+        if(!req.params.topologyId)
+            throw new AppError(StatusCodes.BAD_REQUEST, "Topology id is required");
+        
+        const sims = await SimulationService.getAll(req.params.topologyId);
+        res.json({ success: true, simulations: sims });
     });
 
-    /**
-     * POST /api/topologies/:topologyId/simulations
-     * Body: { name?: string, autoPopulateARP?: boolean, stepDelay?: number }
-     */
-    createSimulation = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const { topologyId } = req.params;
-
-        if (!topologyId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Topology ID is required");
-        }
-
-        const { name, autoPopulateARP, stepDelay } = req.body;
-
-        const { simulation, runtimeInfo } = await SimulationService.createSimulation(topologyId, name, autoPopulateARP, stepDelay);
-
-        res.status(StatusCodes.CREATED).json({
-            success: true,
-            message: "Simulation created",
-            simulation: {
-                ...simulation,
-                isActive: true,
-                runtimeInfo
-            }
-        });
+    // POST /topologies/:topologyId/simulations
+    // body { name, autoPopulateARP }
+    // autoPopulateARP: if true, pre-fills ARP caches so packets dont need ARP resolution
+    // creates a new simulation and builds the topology in memory for packet processing
+    createSimulation = asyncHandler(async (req: Request, res: Response) => {
+        if(!req.params.topologyId)
+            throw new AppError(StatusCodes.BAD_REQUEST, "Topology id is required");
+        
+        const { name, autoPopulateARP } = req.body;
+        const result = await SimulationService.create(req.params.topologyId, name, autoPopulateARP);
+        res.status(201).json({ success: true, ...result });
     });
 
-    /**
-     * GET /api/topologies/:topologyId/simulations/:simulationId
-     */
-    getSimulationById = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const { topologyId, simulationId } = req.params;
+    // GET /topologies/:topologyId/simulations/:simulationId
+    getSimulationById = asyncHandler(async (req: Request, res: Response) => {
+        if(!req.params.topologyId || !req.params.simulationId)
+            throw new AppError(StatusCodes.BAD_REQUEST, "Topology and simulation IDs are required");
 
-        if (!topologyId || !simulationId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Topology ID and Simulation ID are required");
-        }
-
-        const simulation = await SimulationService.getSimulationById(topologyId, simulationId);
-
-        res.json({
-            success: true,
-            simulation
-        });
+        const sim = await SimulationService.getById(req.params.topologyId, req.params.simulationId);
+        res.json({ success: true, simulation: sim });
     });
 
-    /**
-     * POST /api/topologies/:topologyId/simulations/:simulationId/load
-     * Loads a simulation into memory
-     * Body: { autoPopulateARP?: boolean }
-     */
-    loadSimulation = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const { topologyId, simulationId } = req.params;
-
-        if (!topologyId || !simulationId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Topology ID and Simulation ID are required");
-        }
+    // POST /topologies/:topologyId/simulations/:simulationId/load
+    // body { autoPopulateARP }
+    // loads an existing simulation session into memory for packet processing
+    loadSimulation = asyncHandler(async (req: Request, res: Response) => {
+        if(!req.params.topologyId || !req.params.simulationId)
+            throw new AppError(StatusCodes.BAD_REQUEST, "Topology and simulation IDs are required");
 
         const { autoPopulateARP } = req.body;
-
-        const runtime = await SimulationService.loadSimulation(topologyId, simulationId, autoPopulateARP ?? false);
-
-        res.json({
-            success: true,
-            message: "Simulation loaded",
-            runtime
-        });
+        const result = await SimulationService.load(
+            req.params.topologyId, req.params.simulationId, autoPopulateARP
+        );
+        res.json({ success: true, ...result });
     });
 
-    /**
-     * POST /api/topologies/:topologyId/simulations/:simulationId/send-packet
-     * Simulate packet sending from a host 
-     * Body: { sourceNodeId: string, destinationIp: string, protocol: string, payload: string }
-     */
-    sendPacket = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const { simulationId } = req.params;
-
-        if (!simulationId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Simulation ID is required");
-        }
+    // POST /topologies/:topologyId/simulations/:simulationId/send-packet
+    // body { sourceNodeId, destinationIp, protocol, payload }
+    // protocol: "ICMP" or "UDP" (TCP removed for simplicity)
+    // injects a new packet into the simulation from a HOST node
+    sendPacket = asyncHandler(async (req: Request, res: Response) => {
+        if(!req.params.simulationId)
+            throw new AppError(StatusCodes.BAD_REQUEST, "Simulation id is required");
 
         const { sourceNodeId, destinationIp, protocol, payload } = req.body;
-
-        const result = await SimulationService.sendPacket(simulationId, sourceNodeId, destinationIp, protocol, payload);
-
-        res.json({
-            success: true,
-            ...result
-        });
+        const result = await SimulationService.sendPacket(
+            req.params.simulationId, sourceNodeId, destinationIp, protocol, payload
+        );
+        res.json({ success: true, ...result });
     });
 
-    /**
-     * POST /api/topologies/:topologyId/simulations/:simulationId/step
-     * Runs a single simulation step
-     */
-    simulationStep = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const { simulationId } = req.params;
+    // POST /topologies/:topologyId/simulations/:simulationId/step
+    // advances simulation by one tick - packets move to next hop
+    // returns current packet positions for animation
+    simulationStep = asyncHandler(async (req: Request, res: Response) => {
+        if(!req.params.simulationId)
+            throw new AppError(StatusCodes.BAD_REQUEST, "Simulation id is required");
 
-        if (!simulationId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Simulation ID is required");
-        }
-
-        const result = await SimulationService.simulationStep(simulationId);
-
-        res.json({
-            success: true,
-            ...result
-        });
+        const result = await SimulationService.step(req.params.simulationId);
+        res.json({ success: true, ...result });
     });
 
-    /**
-     * POST /api/topologies/:topologyId/simulations/:simulationId/run
-     * Runs the simulation
-     * Body: { stepDelay: number, maxSteps: number }
-     */
-    runSimulation = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const { simulationId } = req.params;
-
-        if (!simulationId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Simulation ID is required");
-        }
+    // POST /topologies/:topologyId/simulations/:simulationId/run
+    // body { stepDelay, maxSteps }
+    // runs simulation continuously until all packets delivered or maxSteps reached
+    runSimulation = asyncHandler(async (req: Request, res: Response) => {
+        if(!req.params.simulationId)
+            throw new AppError(StatusCodes.BAD_REQUEST, "Simulation id is required");
 
         const { stepDelay, maxSteps } = req.body;
-
-        const result = await SimulationService.runSimulation(simulationId, stepDelay, maxSteps);
-
-        res.json({
-            success: true,
-            ...result
-        });
+        const result = await SimulationService.run(req.params.simulationId, stepDelay, maxSteps);
+        res.json({ success: true, ...result });
     });
 
-    /**
-     * POST /api/topologies/:topologyId/simulations/:simulationId/stop
-     * Stop the simulation
-     */
-    stopSimulation = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const { simulationId } = req.params;
+    // POST /topologies/:topologyId/simulations/:simulationId/stop
+    // stops a running simulation
+    stopSimulation = asyncHandler(async (req: Request, res: Response) => {
+        if(!req.params.simulationId)
+            throw new AppError(StatusCodes.BAD_REQUEST, "Simulation id is required");
 
-        if (!simulationId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Simulation ID is required");
-        }
-
-        await SimulationService.stopSimulation(simulationId);
-
-        res.json({ success: true, message: "Simulation stopped" });
+        await SimulationService.stop(req.params.simulationId);
+        res.json({ success: true, message: "stopped" });
     });
 
-    /**
-     * POST /api/topologies/:topologyId/simulations/:simulationId/unload
-     * Unloads the simulation from memory
-     */
-    unloadSimulation = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const { simulationId } = req.params;
+    // POST /topologies/:topologyId/simulations/:simulationId/unload
+    // removes simulation from memory (keeps db record)
+    unloadSimulation = asyncHandler(async (req: Request, res: Response) => {
+        if(!req.params.simulationId)
+            throw new AppError(StatusCodes.BAD_REQUEST, "Simulation id is required");
 
-        if (!simulationId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Simulation ID is required");
-        }
-
-        await SimulationService.unloadSimulation(simulationId);
-
-        res.json({ success: true, message: "Simulation unloaded" });
+        await SimulationService.unload(req.params.simulationId);
+        res.json({ success: true, message: "unloaded" });
     });
 
-    /**
-     * DELETE /api/topologies/:topologyId/simulations/:simulationId
-     */
-    deleteSimulation = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const { topologyId, simulationId } = req.params;
+    // DELETE /topologies/:topologyId/simulations/:simulationId
+    // removes from memory and deletes db record
+    deleteSimulation = asyncHandler(async (req: Request, res: Response) => {
+        if(!req.params.topologyId || !req.params.simulationId)
+            throw new AppError(StatusCodes.BAD_REQUEST, "Topology and simulation IDs are required");
 
-        if (!topologyId || !simulationId) {
-            throw new AppError(StatusCodes.BAD_REQUEST, "Topology ID and Simulation ID are required");
-        }
-
-        const deleted = await SimulationService.deleteSimulation(topologyId, simulationId);
-
-        res.json({
-            success: true,
-            message: "Simulation deleted",
-            deleted
-        });
+        const deleted = await SimulationService.delete(
+            req.params.topologyId, req.params.simulationId
+        );
+        res.json({ success: true, deleted });
     });
 }
 
