@@ -29,9 +29,8 @@ export class Host extends Node {
 
     // find interface that can reach the dst
     private pickInterface(dstIp: string): NetworkInterface | null {
-        // direct route?
         for (const iface of this.interfaces) {
-            if (iface.isInSubnet(dstIp)) return iface;
+            if (iface.isInSubnet(dstIp)) return iface; // if multiple interfaces are in the same subnet this will pick the first
         }
         // use gateway
         if (this.defaultGateway) {
@@ -55,7 +54,7 @@ export class Host extends Node {
     }
 
     lookupARP(ip: string): string | null {
-        const entry = this.arpCache.get(ip);
+        const entry: ARPEntry | undefined = this.arpCache.get(ip);
         if (!entry) return null;
         if (Date.now() - entry.timestamp > this.ARP_TIMEOUT) {
             this.arpCache.delete(ip);
@@ -99,13 +98,13 @@ export class Host extends Node {
         this.cleanARP();
 
         const iface = this.pickInterface(dstIp);
-        if (!iface) {
+        if (!iface)
             throw new Error(`[${this.name}] cant reach ${dstIp} - check gateway config`);
-        }
+
 
         let dstMAC: string;
 
-        // is dst in our subnet?
+        // dst is in our subnet?
         if (iface.isInSubnet(dstIp)) {
             const mac = this.lookupARP(dstIp);
             if (mac) {

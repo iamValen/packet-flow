@@ -142,7 +142,8 @@ export function useSimulation({ topologyId, onSimulationChange }: Props) {
                 // log any deliveries this step
                 for (const d of delivered) {
                     const pktType = getPacketLogType(d.protocol, d.srcIp, d.dstIp);
-                    addLog("delivered", `${d.protocol} delivered to ${d.deliveredTo}`, d.packetId);
+                    if (pktType !== "info")
+                        addLog("delivered", `${d.protocol} delivered to ${d.deliveredTo}`, d.packetId);
                 }
                 
                 // no packets in flight
@@ -237,6 +238,8 @@ export function useSimulation({ topologyId, onSimulationChange }: Props) {
 
 // helper to determine log type based on protocol
 function getPacketLogType(protocol: string, srcIp: string, dstIp: string): LogEntry["type"] {
+    if (srcIp === dstIp)
+        return "info";
     switch (protocol) {
         case "ARP": return "arp";
         case "ICMP": return "icmp";

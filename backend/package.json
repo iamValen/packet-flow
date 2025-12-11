@@ -4,7 +4,9 @@
   "description": "- [X] Document Switch.ts - [X] Document Node.ts - [ ] Switch MAC table cleanup: expiration is checked in lookupMAC() but never proactively clean old entries. Consider adding a cleanup method called periodically - [ ] Firewall logging improvement: When a packet is dropped, log which rule caused it - [ ] Make toJSON abstract method and make it individually in Firewall, Host, Router and Switch - [ ] Implement and Document IP.ts - NetworkInterface static methods - [ ] Document Topology.ts - [ ] Delay, bandwidth in Link.ts",
   "main": "index.js",
   "scripts": {
+    "build": "tsc",
     "start": "npx tsx --env-file=.env --watch  src/server.ts",
+    "dev": "tsc watch src/server.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {

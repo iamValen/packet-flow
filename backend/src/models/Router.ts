@@ -127,12 +127,8 @@ export class Router extends Node {
         const outIface = this.findOutInterface(dstIp);
         if (!outIface) return { needed: false, targetIp: dstIp, outIface: null };
         
-        // determine what IP to ARP for:
-        // - if destination is directly connected, ARP for destination
-        // - if destination is remote (via route), ARP for destination on that interface
-        //   (in real networks, you'd ARP for next-hop, but our simplified model
-        //    routes packets to the right subnet where the destination lives)
         const mac = this.lookupARP(dstIp);
+        // TO FIX: in realnetworks if dstIp is not in same subnet as outIface, we arp for gateway instead
         return { needed: !mac, targetIp: dstIp, outIface };
     }
 
@@ -219,10 +215,7 @@ export class Router extends Node {
         // try to resolve dst mac BEFORE modifying packet state
         const dstMAC = this.lookupARP(packet.dstIp);
         if (!dstMAC) {
-            // ARP miss - return empty array to let Simulator handle ARP resolution
-            // Don't modify packet (TTL, hop) yet - that happens when we actually forward
-            // This prevents the packet from being forwarded with broadcast MAC
-            // which would cause switches to flood it to all ports
+            // TO FIX: router here should generate and send ARP request packet
             console.log(`[${this.name}] arp miss for ${packet.dstIp}, waiting for ARP`);
             return [];
         }
