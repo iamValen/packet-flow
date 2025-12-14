@@ -74,9 +74,9 @@ export default function SendPacketMenu({ isOpen, sourceNode, allNodes, onClose, 
                         ))}
                     </div>
 
-                    <label>Destination IP</label>
+                    <label>destination IP</label>
                     <select value={dstIp} onChange={e => setDstIp(e.target.value)}>
-                        <option value="">Select...</option>
+                        <option value="">select...</option>
                         {dstOptions.map(({ ip, name }) => (
                             <option key={ip} value={ip}>{ip} ({name})</option>
                         ))}

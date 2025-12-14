@@ -62,7 +62,7 @@ export default function NodeMenu({ isOpen, nodeType, existingNode, onClose, onSu
 
                     {nodeType === NodeType.HOST && (
                         <>
-                            <label>Default Gateway</label>
+                            <label>Default gateway</label>
                             <input value={gateway} onChange={e => setGateway(e.target.value)} placeholder="192.168.1.1" />
                         </>
                     )}
@@ -77,7 +77,7 @@ export default function NodeMenu({ isOpen, nodeType, existingNode, onClose, onSu
                                     copy[i].ip = e.target.value;
                                     setInterfaces(copy);
                                 }}
-                                placeholder={nodeType === NodeType.SWITCH ? "0.0.0.1" : "192.168.1.10"} // switches can have non-routable IPs so they are not used internally
+                                placeholder={nodeType === NodeType.SWITCH ? "0.0.0.1" : "192.168.1.10"} // switches can have IPs but they are not used internally (YET)
                             />
                             <span>/</span>
                             <input
@@ -100,13 +100,13 @@ export default function NodeMenu({ isOpen, nodeType, existingNode, onClose, onSu
                         </div>
                     ))}
                     <button className="btn btn-small" onClick={() => setInterfaces([...interfaces, { ip: "", cidr: "24" }])}>
-                        <Plus size={14} /> Add Interface
+                        <Plus size={14} /> add interface
                     </button>
                 </div>
 
                 <div className="menu-footer">
                     {existingNode && onDelete && (
-                        <button className="btn btn-danger" onClick={onDelete}><Trash2 size={16} /> Delete</button>
+                        <button className="btn btn-danger" onClick={onDelete}><Trash2 size={16} /> delete</button>
                     )}
                     <div className="spacer" />
                     <button className="btn" onClick={onClose}>Cancel</button>

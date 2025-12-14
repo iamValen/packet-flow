@@ -28,7 +28,7 @@ datasource db {
 model users {
   id          String   @id @db.Uuid @unique
   password    String   @db.VarChar(255)
-  email       String   @db.VarChar(255) 
+  email       String   @db.VarChar(255)
 }
 
 model Topology {

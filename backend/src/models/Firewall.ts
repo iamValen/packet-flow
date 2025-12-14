@@ -6,7 +6,7 @@ export const FirewallAction = {
 } as const;
 export type FirewallAction = (typeof FirewallAction)[keyof typeof FirewallAction]
 
-export interface FirewallRule {
+export type FirewallRule = {
     id: string;
     srcIp: string;      // "any" or ip/cidr
     dstIp: string;      // "any" or ip/cidr

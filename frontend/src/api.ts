@@ -54,7 +54,7 @@ export const api = {
 
     // simulations
     createSim: (topoId: string, name?: string) =>
-        post(`/topologies/${topoId}/simulations`, { name, autoPopulateARP: false }),
+        post(`/topologies/${topoId}/simulations`, { name, autoPopulateARP: true }),
     sendPacket: (topoId: string, simId: string, nodeId: string, dstIp: string, protocol: string, payload?: string) =>
         post(`/topologies/${topoId}/simulations/${simId}/send-packet`, {
             sourceNodeId: nodeId, destinationIp: dstIp, protocol, payload

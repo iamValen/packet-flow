@@ -1,7 +1,3 @@
-/**
- * ActionPanel - quick actions for selected node
- * Shows edit and send packet buttons (send only for hosts)
- */
 import { X, Settings, Send } from "lucide-react";
 import { NodeType, type NetworkNode } from "../types";
 

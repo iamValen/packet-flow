@@ -7,7 +7,7 @@ import { Router } from "./Router.js";
 import { Switch } from "./Switch.js";
 
 // packet in transit
-type PacketInFlight = {
+type PacketInFlight ={
     packet: Packet;
     currentNode: Node;
     currentIface?: NetworkInterface;
@@ -137,7 +137,7 @@ export class Simulator {
             sourceIface: iface,
             waitingFor: targetIp
         });
-        console.log(`+++ arping for ${targetIp} before sending`);
+        console.log(`ARP request for ${targetIp} before sending`);
         return packet;
     }
 
@@ -196,7 +196,7 @@ export class Simulator {
             const isArp: boolean = packet.protocol === Protocol.ARP;
 
             // process packet at this node?
-            const shouldProcess = atDest || (isArp && currentNode instanceof Router);
+            const shouldProcess = atDest || (isArp && currentNode instanceof Router); // FIX: router arp handling
 
             if (shouldProcess && (currentNode instanceof Host || currentNode instanceof Router)){
                 const reply = currentNode.receivePacket(packet);
@@ -209,14 +209,13 @@ export class Simulator {
                     };
                     this.delivered.push(deliveryInfo);
                     deliveredThisStep.push(deliveryInfo);
-                    console.log(`✓ delivered ${packet.protocol} to ${currentNode.name}`);
+                    console.log(`Delivered ${packet.protocol} to ${currentNode.name}\n`);
                 }
 
-                // if there's a reply, queue it
-                if (reply) {
+                if (reply) { // queue it
                     // add reply packet to the simulation
                     newPackets.push({ packet: reply, currentNode });
-                    console.log(`+++ ${currentNode.name} generated ${reply.protocol} reply`);
+                    console.log(`${currentNode.name} generated ${reply.protocol} reply`);
                 }
 
                 if (atDest) continue;
@@ -241,13 +240,13 @@ export class Simulator {
                     continue;
                 }
             }
-            if (hops.length === 0) {
+            if (hops.length === 0){
                 console.log(`packet dropped at ${currentNode.name}`);
                 continue;
             }
 
             // forward packet
-            if (hops.length === 1) {
+            if (hops.length === 1){
                 const hop = hops[0]!;
                 newPackets.push({ packet, currentNode: hop.node, currentIface: hop.iface });
                 console.log(`${packet.protocol}: ${currentNode.name} -> ${hop.node.name}`);
