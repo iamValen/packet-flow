@@ -4,7 +4,7 @@ PacketFlow is a web-based network packet tracer built to make packet movement ea
 
 It allows to create a topology, add devices like hosts, routers, switches, and firewalls, connect them together, and simulate how packets move through the network. It is meant as a learning project, but also as a practical way to explore routing, switching, ARP, forwarding, and network behavior in a more visual way.
 
-![alt text](image.png)
+![packetflow](assets/packet-flow.png)
 
 ## Why I built this
 
