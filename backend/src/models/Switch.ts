@@ -2,7 +2,7 @@ import { Node, NodeType } from "./Node.js";
 import { NetworkInterface } from "./NetworkInterface.js";
 import { Packet } from "./Packet.js";
 
-// mac table entry
+/** A MAC table entry with expiry tracking. */
 type MACEntry = {
     mac: string;
     ifaceId: string;
@@ -10,8 +10,8 @@ type MACEntry = {
 };
 
 /**
- * layer 2 switch - learns MACs and forwards based on that
- * floods unknown destinations to all ports
+ * Layer-2 switch. Learns source MACs on arrival and forwards to the
+ * known destination port. Floods to all ports when the destination is unknown.
  */
 export class Switch extends Node {
     readonly type: NodeType = NodeType.SWITCH;
@@ -25,20 +25,23 @@ export class Switch extends Node {
     override canForward(): boolean { return true; }
     override getInterfaces(): NetworkInterface[] { return this.interfaces; }
 
-    // learn a mac on a port
+    /**
+     * Records a MAC address → interface mapping.
+     * Ignores broadcast MACs and entries that are already known.
+     * @throws if the MAC address format is invalid
+     */
     learnMAC(mac: string, iface: NetworkInterface): void {
         if (!NetworkInterface.isValidMAC(mac)) throw new Error(`bad mac: ${mac}`);
-        if (mac === "FF:FF:FF:FF:FF:FF") return;  // dont learn broadcast
+        if (mac === "FF:FF:FF:FF:FF:FF") return;
         if (this.macTable.has(mac)) return;
 
-        this.macTable.set(mac, {
-            mac,
-            ifaceId: iface.id,
-            timestamp: Date.now()
-        });
+        this.macTable.set(mac, { mac, ifaceId: iface.id, timestamp: Date.now() });
     }
 
-    // lookup which port has this mac
+    /**
+     * Looks up the interface associated with a MAC address.
+     * @returns the matching interface, or null if unknown or expired
+     */
     private lookupMAC(mac: string): NetworkInterface | null {
         const entry = this.macTable.get(mac);
         if (!entry) return null;
@@ -49,15 +52,20 @@ export class Switch extends Node {
         return this.interfaces.find(i => i.id === entry.ifaceId) || null;
     }
 
+    /** Removes expired entries from the MAC table. */
     private cleanMAC(): void {
         const now = Date.now();
         for (const [mac, entry] of this.macTable) {
-            if (now - entry.timestamp > this.MAC_TIMEOUT) {
+            if (now - entry.timestamp > this.MAC_TIMEOUT)
                 this.macTable.delete(mac);
-            }
         }
     }
-    
+
+    /**
+     * Forwards a packet out the appropriate port.
+     * Learns the source MAC, then either unicasts to the known destination port
+     * or floods to all ports except the incoming one.
+     */
     override forward(packet: Packet, incomingIface?: NetworkInterface): NetworkInterface[] {
         this.cleanMAC();
 
@@ -66,20 +74,16 @@ export class Switch extends Node {
 
         packet.addHop(this);
 
-        // learn source mac
-        if (incomingIface && packet.srcMAC) {
+        if (incomingIface && packet.srcMAC)
             this.learnMAC(packet.srcMAC, incomingIface);
-        }
 
-        // known destination?
         if (packet.dstMAC) {
             const targetIface = this.lookupMAC(packet.dstMAC);
-            if (targetIface && targetIface.id !== incomingIface?.id) {
+            if (targetIface && targetIface.id !== incomingIface?.id)
                 return [targetIface];
-            }
         }
 
-        // flood to all ports except incoming
+        // destination unknown — flood to all ports except the incoming one
         return this.interfaces.filter(i => i.id !== incomingIface?.id);
     }
 }

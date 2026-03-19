@@ -1,10 +1,13 @@
 import { StatusCodes } from "http-status-codes";
-
 import { prisma } from "../prisma.js";
 import { AppError } from "../middleware/errorHandler.js";
 
-// handles topology crud operations
+/** Handles topology CRUD operations. */
 class TopologyService {
+    /**
+     * Returns all topologies with their nodes, interfaces, links, and counts,
+     * ordered by most recently updated.
+     */
     async getAll() {
         return await prisma.topology.findMany({
             include: {
@@ -16,6 +19,10 @@ class TopologyService {
         });
     }
 
+    /**
+     * Returns a topology by id, including all nodes, links, and the 5 most recent simulations.
+     * @throws if the topology is not found
+     */
     async getById(id: string) {
         const topo = await prisma.topology.findUnique({
             where: { id },
@@ -36,6 +43,10 @@ class TopologyService {
         return topo;
     }
 
+    /**
+     * Creates a new topology.
+     * @throws if the name is empty
+     */
     async create(name: string, description?: string) {
         if (!name?.trim()) throw new AppError(StatusCodes.BAD_REQUEST, "name required");
         return await prisma.topology.create({
@@ -43,6 +54,10 @@ class TopologyService {
         });
     }
 
+    /**
+     * Updates a topology's name and/or description.
+     * @throws if the topology is not found
+     */
     async update(id: string, name?: string, description?: string) {
         const topo = await prisma.topology.findUnique({ where: { id } });
         if (!topo) throw new AppError(StatusCodes.NOT_FOUND, "topology not found");
@@ -54,6 +69,10 @@ class TopologyService {
         return await prisma.topology.update({ where: { id }, data });
     }
 
+    /**
+     * Deletes a topology. Cascades to all nodes, interfaces, links, and simulations.
+     * @throws if the topology is not found
+     */
     async delete(id: string) {
         const topo = await prisma.topology.findUnique({
             where: { id },
@@ -65,6 +84,10 @@ class TopologyService {
         return { id: topo.id, name: topo.name };
     }
 
+    /**
+     * Returns a topology and all its nodes with their interfaces.
+     * @throws if the topology is not found
+     */
     async getNodes(id: string) {
         const topo = await prisma.topology.findUnique({ where: { id } });
         if (!topo) throw new AppError(StatusCodes.NOT_FOUND, "topology not found");

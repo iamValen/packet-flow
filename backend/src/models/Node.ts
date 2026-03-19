@@ -10,8 +10,8 @@ export const NodeType = {
 export type NodeType = (typeof NodeType)[keyof typeof NodeType];
 
 /**
- * base class for all network devices
- * routers, hosts, and switches extend this
+ * Abstract base class for all network devices (routers, hosts, switches).
+ * Subclasses implement forwarding behaviour via `forward()`.
  */
 export abstract class Node {
     readonly id: string;
@@ -26,10 +26,8 @@ export abstract class Node {
         this.interfaces = interfaces;
         this.position = position;
 
-        // link interfaces back to this node
-        for (const iface of this.interfaces) {
+        for (const iface of this.interfaces)
             iface.setParentNode(this);
-        }
     }
 
     abstract getInterfaces(): NetworkInterface[];

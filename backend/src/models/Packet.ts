@@ -5,12 +5,10 @@ export const Protocol = {
     ICMP: "ICMP",
     UDP: "UDP",
     ARP: "ARP"
-    // TCP: "TCP"
 } as const;
 
 export type Protocol = (typeof Protocol)[keyof typeof Protocol];
 
-// ARP stuff
 export const ARPType = {
     REQUEST: "REQUEST",
     REPLY: "REPLY"
@@ -24,11 +22,11 @@ export interface ARPData {
     senderMAC: string;
     targetIP: string;
     targetMAC?: string;
-};
+}
 
 /**
- * a packet that moves through the network
- * keeps track of where its been (history) for visualization
+ * A packet travelling through the network.
+ * Tracks its full hop history for visualization.
  */
 export class Packet {
     readonly id: string;
@@ -39,10 +37,18 @@ export class Packet {
     protocol: Protocol;
     payload?: string;
     ttl: number;
-    history: Node[] = [];  // nodes this packet visited
+    /** Ordered list of nodes this packet has visited. */
+    history: Node[] = [];
     readonly created: number;
 
-    constructor( srcIp: string, dstIp: string, protocol: Protocol = Protocol.ICMP, payload?: string, srcMAC?: string, dstMAC?: string) {
+    constructor(
+        srcIp: string,
+        dstIp: string,
+        protocol: Protocol = Protocol.ICMP,
+        payload?: string,
+        srcMAC?: string,
+        dstMAC?: string
+    ) {
         if (!NetworkInterface.isValidIP(srcIp)) throw new Error(`bad src ip: ${srcIp}`);
         if (!NetworkInterface.isValidIP(dstIp)) throw new Error(`bad dst ip: ${dstIp}`);
 
@@ -50,14 +56,14 @@ export class Packet {
         this.srcIp = srcIp;
         this.dstIp = dstIp;
         this.srcMAC = srcMAC || "FF:FF:FF:FF:FF:FF";
-        if(dstMAC) this.dstMAC = dstMAC;
+        if (dstMAC) this.dstMAC = dstMAC;
         this.protocol = protocol;
-        if(payload) this.payload = payload;
-        this.ttl = 64;  // standard ttl
+        if (payload) this.payload = payload;
+        this.ttl = 64;
         this.created = Date.now();
     }
 
-    // make a copy for broadcast scenarios
+    /** Creates a deep copy of this packet (used for broadcast scenarios). */
     clone(): Packet {
         const copy = new Packet(
             this.srcIp,
@@ -72,16 +78,17 @@ export class Packet {
         return copy;
     }
 
-    // called at each hop
+    /** Decrements the TTL by one. */
     decrementTTL(): void {
         this.ttl--;
     }
 
+    /** Returns true if the TTL has reached zero. */
     isExpired(): boolean {
         return this.ttl <= 0;
     }
 
-    // track where packet has been
+    /** Records a node in the packet's hop history. */
     addHop(node: Node): void {
         this.history.push(node);
     }

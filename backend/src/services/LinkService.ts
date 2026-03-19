@@ -1,9 +1,12 @@
 import { StatusCodes } from "http-status-codes";
-
 import { prisma } from "../prisma.js";
 import { AppError } from "../middleware/errorHandler.js";
 
 class LinkService {
+    /**
+     * Returns all links in a topology with their connected interfaces and nodes.
+     * @throws if the topology is not found
+     */
     async getAll(topologyId: string) {
         const topo = await prisma.topology.findUnique({ where: { id: topologyId } });
         if (!topo) throw new AppError(StatusCodes.NOT_FOUND, "topology not found");
@@ -21,6 +24,10 @@ class LinkService {
         return { topology: topo, links };
     }
 
+    /**
+     * Returns a single link by id with its connected interfaces and nodes.
+     * @throws if the link is not found or does not belong to the given topology
+     */
     async getById(topologyId: string, linkId: string) {
         const link = await prisma.link.findUnique({
             where: { id: linkId },
@@ -31,15 +38,18 @@ class LinkService {
         return link;
     }
 
+    /**
+     * Creates a link between two interfaces in the same topology.
+     * @throws if the topology is not found, either interface is missing, they belong to the same node,
+     *         are outside the topology, or are already linked
+     */
     async create(topologyId: string, ifaceAId: string, ifaceBId: string) {
-        if (!ifaceAId || !ifaceBId || ifaceAId === ifaceBId) {
+        if (!ifaceAId || !ifaceBId || ifaceAId === ifaceBId)
             throw new AppError(StatusCodes.BAD_REQUEST, "need two different interfaces");
-        }
 
         const topo = await prisma.topology.findUnique({ where: { id: topologyId } });
         if (!topo) throw new AppError(StatusCodes.NOT_FOUND, "topology not found");
 
-        // get both interfaces
         const [ifaceA, ifaceB] = await Promise.all([
             prisma.networkInterface.findUnique({
                 where: { id: ifaceAId },
@@ -52,14 +62,11 @@ class LinkService {
         ]);
 
         if (!ifaceA || !ifaceB) throw new AppError(StatusCodes.BAD_REQUEST, "interface not found");
-        if (ifaceA.node.topologyId !== topologyId || ifaceB.node.topologyId !== topologyId) {
+        if (ifaceA.node.topologyId !== topologyId || ifaceB.node.topologyId !== topologyId)
             throw new AppError(StatusCodes.BAD_REQUEST, "interfaces must be in this topology");
-        }
-        if (ifaceA.node.id === ifaceB.node.id) {
+        if (ifaceA.node.id === ifaceB.node.id)
             throw new AppError(StatusCodes.BAD_REQUEST, "cant link same node");
-        }
 
-        // check not already linked
         const existing = await prisma.link.findMany({
             where: {
                 OR: [
@@ -70,7 +77,7 @@ class LinkService {
                 ]
             }
         });
-        if (existing.length > 0) throw new AppError(409, "interface already linked");
+        if (existing.length > 0) throw new AppError(StatusCodes.CONFLICT, "interface already linked");
 
         return await prisma.link.create({
             data: {
@@ -89,6 +96,10 @@ class LinkService {
         });
     }
 
+    /**
+     * Deletes a link.
+     * @throws if the link is not found or does not belong to the given topology
+     */
     async delete(topologyId: string, linkId: string) {
         const link = await prisma.link.findUnique({
             where: { id: linkId },
@@ -101,6 +112,10 @@ class LinkService {
         return { id: link.id, nodeA: link.nodeA.name, nodeB: link.nodeB.name };
     }
 
+    /**
+     * Returns all links connected to a specific node.
+     * @throws if the node is not found
+     */
     async getForNode(nodeId: string) {
         const node = await prisma.node.findUnique({
             where: { id: nodeId },

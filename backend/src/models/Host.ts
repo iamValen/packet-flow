@@ -2,15 +2,15 @@ import { Node, NodeType } from "./Node.js";
 import { NetworkInterface } from "./NetworkInterface.js";
 import { Packet, Protocol, ARPType, type ARPData } from "./Packet.js";
 
-// arp cache entry with timeout tracking
+/** ARP cache entry with expiry tracking. */
 type ARPEntry = {
     mac: string;
     timestamp: number;
 };
 
 /**
- * end device that sends/receives packets
- * has arp cache and optional default gateway
+ * End-host node that sends and receives packets.
+ * Maintains an ARP cache and supports an optional default gateway.
  */
 export class Host extends Node {
     readonly type: NodeType = NodeType.HOST;
@@ -22,17 +22,21 @@ export class Host extends Node {
         super(name, position, interfaces);
     }
 
+    /** Sets the default gateway IP. Throws if the IP is invalid. */
     setDefaultGateway(ip: string): void {
         if (!NetworkInterface.isValidIP(ip)) throw new Error(`bad gateway: ${ip}`);
         this.defaultGateway = ip;
     }
 
-    // find interface that can reach the dst
+    /**
+     * Finds the outgoing interface that can reach the destination.
+     * Falls back to the interface that can reach the default gateway.
+     * If multiple interfaces are in the same subnet, the first one is used.
+     */
     private pickInterface(dstIp: string): NetworkInterface | null {
         for (const iface of this.interfaces) {
-            if (iface.isInSubnet(dstIp)) return iface; // if multiple interfaces are in the same subnet this will pick the first
+            if (iface.isInSubnet(dstIp)) return iface;
         }
-        // use gateway
         if (this.defaultGateway) {
             for (const iface of this.interfaces) {
                 if (iface.isInSubnet(this.defaultGateway)) return iface;
@@ -41,18 +45,23 @@ export class Host extends Node {
         return null;
     }
 
-    override canForward(): boolean { return false; }  // hosts dont forward
+    /** Hosts do not forward packets. */
+    override canForward(): boolean { return false; }
     override getInterfaces(): NetworkInterface[] { return this.interfaces; }
 
-    override forward(packet: Packet): NetworkInterface[] {
+    override forward(_packet: Packet): NetworkInterface[] {
         throw new Error("hosts cant forward packets");
     }
 
-    // arp stuff
+    /** Adds or refreshes an ARP cache entry. */
     addARP(ip: string, mac: string): void {
         this.arpCache.set(ip, { mac, timestamp: Date.now() });
     }
 
+    /**
+     * Looks up a MAC address in the ARP cache.
+     * @returns the MAC address, or null if not found or expired
+     */
     lookupARP(ip: string): string | null {
         const entry: ARPEntry | undefined = this.arpCache.get(ip);
         if (!entry) return null;
@@ -63,20 +72,21 @@ export class Host extends Node {
         return entry.mac;
     }
 
+    /** Returns a copy of the ARP cache. */
     getARPCache(): Map<string, ARPEntry> {
         return new Map(this.arpCache);
     }
 
+    /** Removes expired entries from the ARP cache. */
     private cleanARP(): void {
         const now = Date.now();
         for (const [ip, entry] of this.arpCache) {
-            if (now - entry.timestamp > this.ARP_TIMEOUT) {
+            if (now - entry.timestamp > this.ARP_TIMEOUT)
                 this.arpCache.delete(ip);
-            }
         }
     }
 
-    // build arp request packet
+    /** Builds and returns an ARP request packet for the given target IP. */
     makeARPRequest(targetIP: string, iface: NetworkInterface): Packet {
         const data: ARPData = {
             type: ARPType.REQUEST,
@@ -93,7 +103,11 @@ export class Host extends Node {
         return pkt;
     }
 
-    // create and send a packet
+    /**
+     * Creates and prepares a packet for sending.
+     * If the destination MAC is unknown, an ARP request is issued first.
+     * @returns the packet and the outgoing interface
+     */
     sendPacket(dstIp: string, protocol: Protocol, payload?: string): { packet: Packet; iface: NetworkInterface } {
         this.cleanARP();
 
@@ -101,21 +115,17 @@ export class Host extends Node {
         if (!iface)
             throw new Error(`[${this.name}] cant reach ${dstIp} - check gateway config`);
 
-
         let dstMAC: string;
 
-        // dst is in our subnet?
         if (iface.isInSubnet(dstIp)) {
             const mac = this.lookupARP(dstIp);
             if (mac) {
                 dstMAC = mac;
             } else {
-                // need arp first - use broadcast
                 this.makeARPRequest(dstIp, iface);
                 dstMAC = "FF:FF:FF:FF:FF:FF";
             }
         } else {
-            // going through gateway
             if (!this.defaultGateway) throw new Error(`[${this.name}] no gateway set`);
             const gwMAC = this.lookupARP(this.defaultGateway);
             if (gwMAC) {
@@ -131,15 +141,17 @@ export class Host extends Node {
         return { packet: pkt, iface };
     }
 
-    // handle incoming packet
+    /**
+     * Handles an incoming packet. Learns the sender's MAC,
+     * then dispatches to the appropriate protocol handler.
+     * @returns a reply packet, or null if no reply is needed
+     */
     receivePacket(packet: Packet): Packet | null {
         this.cleanARP();
         packet.addHop(this);
 
-        // learn sender mac
-        if (packet.srcMAC && packet.srcMAC !== "FF:FF:FF:FF:FF:FF") {
+        if (packet.srcMAC && packet.srcMAC !== "FF:FF:FF:FF:FF:FF")
             this.addARP(packet.srcIp, packet.srcMAC);
-        }
 
         switch (packet.protocol) {
             case Protocol.ARP:
@@ -154,11 +166,11 @@ export class Host extends Node {
         }
     }
 
+    /** Handles ARP requests (replies if targeted at us) and ARP replies (learns the MAC). */
     private handleARP(packet: Packet): Packet | null {
         const data: ARPData = JSON.parse(packet.payload!);
 
         if (data.type === ARPType.REQUEST) {
-            // is this for us?
             const myIface = this.interfaces.find(i => i.ip === data.targetIP);
             if (myIface) {
                 console.log(`[${this.name}] ARP reply to ${data.senderIP}`);
@@ -183,18 +195,16 @@ export class Host extends Node {
         return null;
     }
 
+    /** Handles ICMP packets. Replies to echo requests addressed to one of our interfaces. */
     private handleICMP(packet: Packet): Packet | null {
         const myIface = this.interfaces.find(i => i.ip === packet.dstIp);
         if (!myIface) return null;
 
-        // check mac
-        if (packet.dstMAC !== "FF:FF:FF:FF:FF:FF" && packet.dstMAC !== myIface.mac) {
+        if (packet.dstMAC !== "FF:FF:FF:FF:FF:FF" && packet.dstMAC !== myIface.mac)
             return null;
-        }
 
         console.log(`[${this.name}] got ICMP from ${packet.srcIp}`);
 
-        // reply to echo requests
         if (packet.payload === "ICMP Echo Request") {
             const reply = new Packet(
                 myIface.ip, packet.srcIp, Protocol.ICMP,

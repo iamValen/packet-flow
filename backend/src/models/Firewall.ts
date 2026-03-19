@@ -4,35 +4,46 @@ export const FirewallAction = {
     ALLOW: "ALLOW",
     DROP: "DROP"
 } as const;
-export type FirewallAction = (typeof FirewallAction)[keyof typeof FirewallAction]
+export type FirewallAction = (typeof FirewallAction)[keyof typeof FirewallAction];
 
+/** A single firewall rule entry. */
 export type FirewallRule = {
     id: string;
-    srcIp: string;      // "any" or ip/cidr
-    dstIp: string;      // "any" or ip/cidr
+    /** "any" or a specific IP/CIDR */
+    srcIp: string;
+    /** "any" or a specific IP/CIDR */
+    dstIp: string;
     protocol?: Protocol;
     action: FirewallAction;
-    priority: number;   // lower = higher priority
-}
+    /** Lower number = higher priority (checked first). */
+    priority: number;
+};
 
 /**
- * packet filter firewall
- * checks rules in priority order (lowest is highest priority)
+ * Stateless packet-filter firewall.
+ * Rules are checked in priority order (lowest priority number wins).
+ * Falls back to `defaultAction` if no rule matches.
  */
 export class Firewall {
     private rules: FirewallRule[] = [];
-    private defaultAction: FirewallAction = FirewallAction.ALLOW; // if no rules match uses this rule
+    /** Action used when no rule matches. Defaults to ALLOW. */
+    private defaultAction: FirewallAction = FirewallAction.ALLOW;
 
+    /**
+     * Adds a rule and re-sorts the list by priority.
+     * @returns the created rule with its generated id
+     */
     addRule(rule: Omit<FirewallRule, "id">): FirewallRule {
-        const newRule: FirewallRule = {
-            ...rule,
-            id: crypto.randomUUID()
-        };
+        const newRule: FirewallRule = { ...rule, id: crypto.randomUUID() };
         this.rules.push(newRule);
         this.rules.sort((a, b) => a.priority - b.priority);
         return newRule;
     }
 
+    /**
+     * Removes a rule by id.
+     * @returns true if the rule was found and removed
+     */
     removeRule(id: string): boolean {
         const idx = this.rules.findIndex(r => r.id === id);
         if (idx === -1) return false;
@@ -40,51 +51,46 @@ export class Firewall {
         return true;
     }
 
+    /** Returns a shallow copy of all rules in priority order. */
     getRules(): FirewallRule[] {
         return [...this.rules];
     }
 
+    /** Removes all rules. */
     clearRules(): void {
         this.rules = [];
     }
 
+    /** Sets the action used when no rule matches. */
     setDefaultAction(action: FirewallAction): void {
         this.defaultAction = action;
     }
 
-    // check if packet should be allowed
+    /**
+     * Checks whether a packet should be allowed or dropped.
+     * Rules are evaluated in priority order; the first match wins.
+     * @returns ALLOW or DROP
+     */
     check(srcIp: string, dstIp: string, protocol?: Protocol): FirewallAction {
         for (const rule of this.rules) {
-            if (this.matches(rule, srcIp, dstIp, protocol)) {
+            if (this.matches(rule, srcIp, dstIp, protocol))
                 return rule.action;
-            }
         }
         return this.defaultAction;
     }
 
-    // check if rule matches given packet info
+    /** Returns true if the rule matches the given packet parameters. */
     private matches(rule: FirewallRule, srcIp: string, dstIp: string, protocol?: Protocol): boolean {
-        // check src
-        if (rule.srcIp !== "any" && !this.ipMatches(srcIp, rule.srcIp)) {
-            return false;
-        }
-        // check dst
-        if (rule.dstIp !== "any" && !this.ipMatches(dstIp, rule.dstIp)) {
-            return false;
-        }
-        // check protocol
-        if (rule.protocol && protocol && rule.protocol !== protocol) {
-            return false;
-        }
+        if (rule.srcIp !== "any" && !this.ipMatches(srcIp, rule.srcIp)) return false;
+        if (rule.dstIp !== "any" && !this.ipMatches(dstIp, rule.dstIp)) return false;
+        if (rule.protocol && protocol && rule.protocol !== protocol) return false;
         return true;
     }
 
-    // check if ip matches given format
+    /** Checks if an IP matches a format string (exact match or CIDR). */
     private ipMatches(ip: string, format: string): boolean {
-        // exact match
         if (ip === format) return true;
 
-        // CIDR match (e.g. 192.168.1.0/24)
         if (format.includes("/")) {
             const [network, prefixStr] = format.split("/");
             const prefix = parseInt(prefixStr!, 10);
@@ -100,7 +106,7 @@ export class Firewall {
         return false;
     }
 
-    // convert ip to number
+    /** Converts a dotted-decimal IP string to a 32-bit unsigned integer. */
     private ipToNum(ip: string): number {
         const parts = ip.split(".").map(Number);
         return ((parts[0]! << 24) | (parts[1]! << 16) | (parts[2]! << 8) | parts[3]!) >>> 0;

@@ -10,6 +10,7 @@ import { NodeType } from "../models/Node.js";
 
 const prisma = new PrismaClient();
 
+/** Result of building a topology from the database for simulation. */
 export type BuildResult = {
     topology: Topology;
     simulator: Simulator;
@@ -18,10 +19,12 @@ export type BuildResult = {
 };
 
 /**
- * builds a topology from the database for simulation
+ * Builds a topology from the database and wires it up for simulation.
+ * @param topologyId - ID of the topology to load
+ * @param autoFillARP - if true, pre-fills ARP caches so packets skip ARP resolution
+ * @returns the built topology, simulator instance, and id-to-object maps
  */
-export async function buildFromDB( topologyId: string, autoFillARP: boolean = false): Promise<BuildResult> {
-    // grab everything from db
+export async function buildFromDB(topologyId: string, autoFillARP: boolean = false): Promise<BuildResult> {
     const dbTopo = await prisma.topology.findUnique({
         where: { id: topologyId },
         include: {
@@ -57,9 +60,8 @@ export async function buildFromDB( topologyId: string, autoFillARP: boolean = fa
         switch (dbNode.type) {
             case NodeType.HOST:
                 node = new Host(dbNode.name, pos, ifaces);
-                if (dbNode.defaultGateway) {
+                if (dbNode.defaultGateway)
                     (node as Host).setDefaultGateway(dbNode.defaultGateway);
-                }
                 break;
             case NodeType.ROUTER:
                 node = new Router(dbNode.name, pos, ifaces);
@@ -79,19 +81,15 @@ export async function buildFromDB( topologyId: string, autoFillARP: boolean = fa
     for (const dbLink of dbTopo.links) {
         const ifaceA = ifaceMap.get(dbLink.interfaceAId);
         const ifaceB = ifaceMap.get(dbLink.interfaceBId);
-        if (ifaceA && ifaceB) {
+        if (ifaceA && ifaceB)
             topology.addLink(ifaceA, ifaceB);
-        }
     }
 
-    // auto configure routes
     console.log("=== configuring routes ===");
     topology.autoConfigureRoutes();
 
-    // create simulator
     const simulator = new Simulator(topology);
 
-    // fill arp if requested
     if (autoFillARP) {
         console.log("=== filling arp caches ===");
         simulator.fillARP();
